@@ -8,10 +8,10 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
 import java.io.IOException;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.Comparator;
 
 public class StudentPaymentApp extends JFrame {
     private JTable studentTable;
@@ -23,12 +23,29 @@ public class StudentPaymentApp extends JFrame {
 
     public StudentPaymentApp() {
         setTitle("Student Payment Database");
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         setSize(1200, 700);
         setLocationRelativeTo(null);
 
+        // Add window listener to save data on close
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                saveAndExit();
+            }
+        });
+
         initializeUI();
         loadData();
+    }
+
+    private void saveAndExit() {
+        if (students != null && !students.isEmpty()) {
+            // Save current data without incrementing import counter
+            DataManager.saveDataOnly(students);
+        }
+        dispose();
+        System.exit(0);
     }
 
     private void initializeUI() {
@@ -62,10 +79,15 @@ public class StudentPaymentApp extends JFrame {
 
         // Split pane for student list and payment details
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
-        splitPane.setDividerLocation(400);
-        splitPane.setResizeWeight(0.35);
+        splitPane.setDividerLocation(450);
+        splitPane.setResizeWeight(0.4);
         splitPane.setOneTouchExpandable(true);
         splitPane.setContinuousLayout(true);
+
+        // Ensure divider is positioned after UI is realized
+        splitPane.addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY, evt -> {
+            // Force right panel to be visible
+        });
 
         // Left panel - Student List
         JPanel leftPanel = new JPanel(new BorderLayout());
@@ -118,7 +140,10 @@ public class StudentPaymentApp extends JFrame {
         rightPanel.setMinimumSize(new Dimension(500, 400));
         rightPanel.setPreferredSize(new Dimension(700, 500));
 
-        String[] paymentColumns = {"Receipt #", "Program", "Intel Fee", "T-Shirt", "Penalties", "CIT Night", "Received By", "Remarks", "Total"};
+        // Force right panel to be visible
+        rightPanel.setVisible(true);
+
+        String[] paymentColumns = {"Receipt #", "Program", "Remittance Date", "Intel Fee", "T-Shirt", "Penalties", "CIT Night", "Received By", "Remarks", "Total"};
         paymentTableModel = new DefaultTableModel(paymentColumns, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -127,8 +152,9 @@ public class StudentPaymentApp extends JFrame {
 
             @Override
             public Class<?> getColumnClass(int columnIndex) {
+                // Receipt # is Integer, Total is Double, rest are String
                 if (columnIndex == 0) return Integer.class;
-                if (columnIndex >= 2 && columnIndex <= 8) return Double.class;
+                if (columnIndex == 9) return Double.class;
                 return String.class;
             }
         };
@@ -138,16 +164,18 @@ public class StudentPaymentApp extends JFrame {
         paymentTable.getTableHeader().setReorderingAllowed(false);
         paymentTable.getColumnModel().getColumn(0).setMaxWidth(90);
         paymentTable.getColumnModel().getColumn(0).setMinWidth(90);
-        paymentTable.getColumnModel().getColumn(2).setMaxWidth(90);
-        paymentTable.getColumnModel().getColumn(2).setMinWidth(80);
+        paymentTable.getColumnModel().getColumn(2).setMaxWidth(110); // Remittance Date
+        paymentTable.getColumnModel().getColumn(2).setMinWidth(100);
         paymentTable.getColumnModel().getColumn(3).setMaxWidth(90);
         paymentTable.getColumnModel().getColumn(3).setMinWidth(80);
         paymentTable.getColumnModel().getColumn(4).setMaxWidth(90);
         paymentTable.getColumnModel().getColumn(4).setMinWidth(80);
         paymentTable.getColumnModel().getColumn(5).setMaxWidth(90);
         paymentTable.getColumnModel().getColumn(5).setMinWidth(80);
-        paymentTable.getColumnModel().getColumn(8).setMaxWidth(100);
-        paymentTable.getColumnModel().getColumn(8).setMinWidth(90);
+        paymentTable.getColumnModel().getColumn(6).setMaxWidth(90);
+        paymentTable.getColumnModel().getColumn(6).setMinWidth(80);
+        paymentTable.getColumnModel().getColumn(9).setMaxWidth(100);
+        paymentTable.getColumnModel().getColumn(9).setMinWidth(90);
 
         JScrollPane paymentScrollPane = new JScrollPane(paymentTable);
         paymentScrollPane.setMinimumSize(new Dimension(400, 300));
@@ -198,14 +226,34 @@ public class StudentPaymentApp extends JFrame {
         });
 
         add(mainPanel);
+
+        // Ensure split pane divider is properly positioned after window is shown
+        addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentShown(ComponentEvent e) {
+                splitPane.setDividerLocation(450);
+            }
+        });
     }
 
     private void loadData() {
-        // Try to load the default Excel file
+        // First, try to load saved data from JSON
+        DataManager.SavedData savedData = DataManager.loadData();
+        if (savedData != null && savedData.getStudents() != null && !savedData.getStudents().isEmpty()) {
+            students = savedData.getStudents();
+            populateStudentTable();
+            String lastImportInfo = DataManager.getLastImportInfo();
+            statusLabel.setText("Loaded " + students.size() + " students from saved data. " + lastImportInfo);
+            return;
+        }
+
+        // If no saved data, try to load the default Excel file
         File defaultFile = new File("Payment Import Jul 28, 2026.xlsx");
         if (defaultFile.exists()) {
             try {
                 students = ExcelImporter.importFromExcel(defaultFile.getAbsolutePath());
+                // Merge with any existing (should be empty, but just in case)
+                students = DataManager.mergeStudents(students);
                 populateStudentTable();
                 statusLabel.setText("Loaded " + students.size() + " students from default file");
             } catch (IOException ex) {
@@ -228,10 +276,24 @@ public class StudentPaymentApp extends JFrame {
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File selectedFile = fileChooser.getSelectedFile();
+
+            // Show date picker for remittance date
+            LocalDate remittanceDate = showRemittanceDateDialog();
+            if (remittanceDate == null) {
+                // User cancelled date selection
+                return;
+            }
+
             try {
-                students = ExcelImporter.importFromExcel(selectedFile.getAbsolutePath());
+                List<Student> newStudents = ExcelImporter.importFromExcel(selectedFile.getAbsolutePath(), remittanceDate);
+                // Merge with existing data (append new students/payments)
+                students = DataManager.mergeStudents(newStudents);
                 populateStudentTable();
-                statusLabel.setText("Loaded " + students.size() + " students from " + selectedFile.getName());
+
+                // Save the merged data
+                DataManager.saveAfterImport(students, selectedFile.getName());
+
+                statusLabel.setText("Loaded " + students.size() + " students from " + selectedFile.getName() + " (appended to existing)");
             } catch (IOException ex) {
                 JOptionPane.showMessageDialog(this, "Error importing file: " + ex.getMessage(),
                     "Import Error", JOptionPane.ERROR_MESSAGE);
@@ -241,14 +303,38 @@ public class StudentPaymentApp extends JFrame {
         }
     }
 
+    private LocalDate showRemittanceDateDialog() {
+        // Create a panel with a date spinner
+        SpinnerDateModel dateModel = new SpinnerDateModel();
+        JSpinner dateSpinner = new JSpinner(dateModel);
+        dateSpinner.setEditor(new JSpinner.DateEditor(dateSpinner, "yyyy-MM-dd"));
+        dateSpinner.setValue(java.util.Date.from(LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant()));
+
+        JPanel panel = new JPanel(new BorderLayout(5, 5));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        panel.add(new JLabel("Select Remittance Date:"), BorderLayout.NORTH);
+        panel.add(dateSpinner, BorderLayout.CENTER);
+
+        int result = JOptionPane.showConfirmDialog(this, panel, "Remittance Date",
+            JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (result == JOptionPane.OK_OPTION) {
+            java.util.Date date = (java.util.Date) dateSpinner.getValue();
+            return date.toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDate();
+        }
+        return null;
+    }
+
     private void refreshData() {
-        // Re-import from default file
+        // Re-import from default file and merge with existing
         File defaultFile = new File("Payment Import Jul 28, 2026.xlsx");
         if (defaultFile.exists()) {
             try {
-                students = ExcelImporter.importFromExcel(defaultFile.getAbsolutePath());
+                List<Student> newStudents = ExcelImporter.importFromExcel(defaultFile.getAbsolutePath());
+                students = DataManager.mergeStudents(newStudents);
                 populateStudentTable();
-                statusLabel.setText("Refreshed: " + students.size() + " students loaded");
+                DataManager.saveAfterImport(students, defaultFile.getName());
+                statusLabel.setText("Refreshed: " + students.size() + " students loaded (merged)");
             } catch (IOException ex) {
                 statusLabel.setText("Refresh failed: " + ex.getMessage());
             }
@@ -291,6 +377,7 @@ public class StudentPaymentApp extends JFrame {
         if (students == null || modelRow >= students.size()) return;
 
         Student student = students.get(modelRow);
+
         paymentTableModel.setRowCount(0);
         studentInfoPanel.removeAll();
 
@@ -318,6 +405,7 @@ public class StudentPaymentApp extends JFrame {
             paymentTableModel.addRow(new Object[]{
                 payment.getReceiptNumber(),
                 payment.getProgram(),
+                payment.getRemittanceDate() != null ? payment.getRemittanceDate().toString() : "-",
                 payment.getIntelFee() != null ? payment.getIntelFee() : "-",
                 payment.getTshirtSizing() != null ? payment.getTshirtSizing() : "-",
                 payment.getPenalties() != null ? payment.getPenalties() : "-",

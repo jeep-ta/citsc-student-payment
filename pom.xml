@@ -24,6 +24,12 @@
       <artifactId>poi-ooxml</artifactId>
       <version>5.3.0</version>
     </dependency>
+    <!-- Gson for JSON serialization -->
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <version>2.10.1</version>
+    </dependency>
     <!-- JUnit 5 for testing -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>

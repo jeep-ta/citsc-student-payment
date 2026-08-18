@@ -1,5 +1,7 @@
 package com.payment;
 
+import java.time.LocalDate;
+
 public class Payment {
     private int receiptNumber;
     private String name;
@@ -10,6 +12,7 @@ public class Payment {
     private Double citNight;
     private String receivedBy;
     private String remarks;
+    private LocalDate remittanceDate;
 
     public Payment(int receiptNumber, String name, String program,
                    Double intelFee, Double tshirtSizing, Double penalties,
@@ -23,6 +26,12 @@ public class Payment {
         this.citNight = citNight;
         this.receivedBy = receivedBy;
         this.remarks = remarks;
+        this.remittanceDate = LocalDate.now(); // Default to today
+    }
+
+    // No-arg constructor for Gson deserialization
+    public Payment() {
+        this.remittanceDate = LocalDate.now();
     }
 
     public int getReceiptNumber() {
@@ -95,6 +104,14 @@ public class Payment {
 
     public void setRemarks(String remarks) {
         this.remarks = remarks;
+    }
+
+    public LocalDate getRemittanceDate() {
+        return remittanceDate;
+    }
+
+    public void setRemittanceDate(LocalDate remittanceDate) {
+        this.remittanceDate = remittanceDate;
     }
 
     public double getTotalAmount() {

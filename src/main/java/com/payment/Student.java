@@ -13,6 +13,11 @@ public class Student {
         this.payments = new ArrayList<>();
     }
 
+    // No-arg constructor for Gson deserialization
+    public Student() {
+        this.payments = new ArrayList<>();
+    }
+
     public String getName() {
         return name;
     }

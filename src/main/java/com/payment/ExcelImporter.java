@@ -6,11 +6,16 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.time.LocalDate;
 import java.util.*;
 
 public class ExcelImporter {
 
     public static List<Student> importFromExcel(String filePath) throws IOException {
+        return importFromExcel(filePath, LocalDate.now());
+    }
+
+    public static List<Student> importFromExcel(String filePath, LocalDate remittanceDate) throws IOException {
         Map<String, Student> studentMap = new LinkedHashMap<>();
 
         try (FileInputStream fis = new FileInputStream(new File(filePath));
@@ -57,10 +62,11 @@ public class ExcelImporter {
                     studentMap.put(name, student);
                 }
 
-                // Add payment
+                // Add payment with remittance date
                 Payment payment = new Payment(receiptNumber, name, program,
                         intelFee, tshirtSizing, penalties, citNight,
                         receivedBy, remarks);
+                payment.setRemittanceDate(remittanceDate);
                 student.addPayment(payment);
             }
         }
