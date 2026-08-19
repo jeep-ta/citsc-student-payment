@@ -111,9 +111,40 @@ public class DataManager {
     }
 
     /**
+     * Assign student codes to students that don't have one.
+     * Uses STU-XXXXXX format.
+     *
+     * @param students List of students to process
+     * @return Number of students assigned codes
+     */
+    public static int assignStudentCodes(List<Student> students) {
+        // Find max existing sequence
+        int maxSeq = 0;
+        for (Student s : students) {
+            if (s.getStudentCode() != null) {
+                int seq = StudentCodeGenerator.extractSequence(s.getStudentCode());
+                if (seq > maxSeq) maxSeq = seq;
+            }
+        }
+
+        int assigned = 0;
+        for (Student s : students) {
+            if (s.getStudentCode() == null || s.getStudentCode().isEmpty()) {
+                maxSeq++;
+                s.setStudentCode(StudentCodeGenerator.generate(maxSeq));
+                assigned++;
+            }
+        }
+        return assigned;
+    }
+
+    /**
      * Merge newly imported students with existing saved students.
-     * New payments are appended to existing students (matched by name).
+     * New payments are appended to existing students (matched by normalized name).
      * New students are added to the list.
+     * Student codes are assigned to new students.
+     * Payment.studentId is linked to Student.studentCode.
+     *
      * @param newStudents List of students from new import
      * @return Merged list of students
      */
@@ -123,15 +154,18 @@ public class DataManager {
             ? savedData.getStudents()
             : new ArrayList<>();
 
-        // Create a map of existing students by name (case-insensitive)
+        // Create a map of existing students by normalized name (case-insensitive)
         Map<String, Student> existingMap = new HashMap<>();
         for (Student s : existingStudents) {
-            existingMap.put(s.getName().toLowerCase(), s);
+            String key = s.getNormalizedName() != null ? s.getNormalizedName() : s.getName().toLowerCase();
+            existingMap.put(key, s);
         }
 
         // Merge new students
         for (Student newStudent : newStudents) {
-            String key = newStudent.getName().toLowerCase();
+            String key = newStudent.getNormalizedName() != null
+                ? newStudent.getNormalizedName()
+                : newStudent.getName().toLowerCase();
             Student existing = existingMap.get(key);
 
             if (existing != null) {
@@ -144,6 +178,8 @@ public class DataManager {
 
                 for (Payment newPayment : newStudent.getPayments()) {
                     if (!existingReceipts.contains(newPayment.getReceiptNumber())) {
+                        // Link payment to student's code
+                        newPayment.setStudentId(existing.getStudentCode());
                         existing.addPayment(newPayment);
                     }
                 }
@@ -160,6 +196,18 @@ public class DataManager {
         List<Student> merged = new ArrayList<>(existingMap.values());
         merged.sort(Comparator.comparing(Student::getName, String.CASE_INSENSITIVE_ORDER));
 
+        // Assign student codes to any students without them
+        assignStudentCodes(merged);
+
+        // Link all payments to their student's code
+        for (Student s : merged) {
+            for (Payment p : s.getPayments()) {
+                if (p.getStudentId() == null || p.getStudentId().isEmpty()) {
+                    p.setStudentId(s.getStudentCode());
+                }
+            }
+        }
+
         return merged;
     }
 
@@ -170,6 +218,16 @@ public class DataManager {
      * @return true if successful
      */
     public static boolean saveAfterImport(List<Student> students, String importFileName) {
+        // Ensure all students have codes and payments are linked
+        assignStudentCodes(students);
+        for (Student s : students) {
+            for (Payment p : s.getPayments()) {
+                if (p.getStudentId() == null || p.getStudentId().isEmpty()) {
+                    p.setStudentId(s.getStudentCode());
+                }
+            }
+        }
+
         SavedData data = new SavedData();
         data.setStudents(students);
         data.setLastImportFile(importFileName);

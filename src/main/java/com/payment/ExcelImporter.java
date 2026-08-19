@@ -16,6 +16,7 @@ public class ExcelImporter {
     }
 
     public static List<Student> importFromExcel(String filePath, LocalDate remittanceDate) throws IOException {
+        // Use normalized name as key for matching
         Map<String, Student> studentMap = new LinkedHashMap<>();
 
         try (FileInputStream fis = new FileInputStream(new File(filePath));
@@ -55,11 +56,20 @@ public class ExcelImporter {
                 String receivedBy = getStringValue(receivedByCell).trim();
                 String remarks = getStringValue(remarksCell).trim();
 
+                // Normalize name for matching key
+                String normalizedName = NameNormalizer.normalize(name);
+
                 // Get or create student
-                Student student = studentMap.get(name);
+                Student student = studentMap.get(normalizedName);
                 if (student == null) {
                     student = new Student(name);
-                    studentMap.put(name, student);
+                    student.setProgram(program);
+                    studentMap.put(normalizedName, student);
+                } else {
+                    // If existing student has no program but this row has one, set it
+                    if (student.getProgram() == null && !program.isEmpty()) {
+                        student.setProgram(program);
+                    }
                 }
 
                 // Add payment with remittance date

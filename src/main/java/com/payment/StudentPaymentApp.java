@@ -266,65 +266,16 @@ public class StudentPaymentApp extends JFrame {
     }
 
     private void importExcel() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Select Excel File");
-        fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Excel Files", "xlsx", "xls"));
+        ImportService importService = new ImportService();
+        ImportDialog dialog = new ImportDialog(this, importService);
+        dialog.setVisible(true);
 
-        // Set default directory to project folder
-        fileChooser.setCurrentDirectory(new File("."));
-
-        int result = fileChooser.showOpenDialog(this);
-        if (result == JFileChooser.APPROVE_OPTION) {
-            File selectedFile = fileChooser.getSelectedFile();
-
-            // Show date picker for remittance date
-            LocalDate remittanceDate = showRemittanceDateDialog();
-            if (remittanceDate == null) {
-                // User cancelled date selection
-                return;
-            }
-
-            try {
-                List<Student> newStudents = ExcelImporter.importFromExcel(selectedFile.getAbsolutePath(), remittanceDate);
-                // Merge with existing data (append new students/payments)
-                students = DataManager.mergeStudents(newStudents);
-                populateStudentTable();
-
-                // Save the merged data
-                DataManager.saveAfterImport(students, selectedFile.getName());
-
-                statusLabel.setText("Loaded " + students.size() + " students from " + selectedFile.getName() + " (appended to existing)");
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "Error importing file: " + ex.getMessage(),
-                    "Import Error", JOptionPane.ERROR_MESSAGE);
-                ex.printStackTrace();
-                statusLabel.setText("Import failed: " + ex.getMessage());
-            }
-        }
+        // Reload data after import to show latest
+        loadData();
+        populateStudentTable();
     }
 
-    private LocalDate showRemittanceDateDialog() {
-        // Create a panel with a date spinner
-        SpinnerDateModel dateModel = new SpinnerDateModel();
-        JSpinner dateSpinner = new JSpinner(dateModel);
-        dateSpinner.setEditor(new JSpinner.DateEditor(dateSpinner, "yyyy-MM-dd"));
-        dateSpinner.setValue(java.util.Date.from(LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant()));
-
-        JPanel panel = new JPanel(new BorderLayout(5, 5));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        panel.add(new JLabel("Select Remittance Date:"), BorderLayout.NORTH);
-        panel.add(dateSpinner, BorderLayout.CENTER);
-
-        int result = JOptionPane.showConfirmDialog(this, panel, "Remittance Date",
-            JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-
-        if (result == JOptionPane.OK_OPTION) {
-            java.util.Date date = (java.util.Date) dateSpinner.getValue();
-            return date.toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDate();
-        }
-        return null;
-    }
-
+    
     private void refreshData() {
         // Re-import from default file and merge with existing
         File defaultFile = new File("Payment Import Jul 28, 2026.xlsx");

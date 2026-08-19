@@ -1,0 +1,22 @@
+# Build output
+target/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# JSON data files
+*.json
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
