@@ -28,6 +28,9 @@ public class ImportPreviewItem {
     private String remarks;
     private LocalDate remittanceDate;
     private ChargeAcademicTerm chargeAcademicTerm; // Academic term for CIT Night/Penalty charges
+    private String receiptAcademicYear;
+    private ChargeAcademicTerm receiptTerm;
+    private String sourceFileName;
 
     // Match results
     private String status;              // NEW, DUPLICATE, CONFLICT, AMBIGUOUS, ERROR
@@ -74,6 +77,14 @@ public class ImportPreviewItem {
     public String getReceivedBy() { return receivedBy; }
     public String getRemarks() { return remarks; }
     public LocalDate getRemittanceDate() { return remittanceDate; }
+    public String getReceiptAcademicYear() { return receiptAcademicYear; }
+    public ChargeAcademicTerm getReceiptTerm() {
+        return receiptTerm != null ? receiptTerm : ChargeAcademicTerm.UNASSIGNED;
+    }
+    public ReceiptKey getReceiptKey() {
+        return new ReceiptKey(receiptNumber, receiptAcademicYear, getReceiptTerm());
+    }
+    public String getSourceFileName() { return sourceFileName; }
     public String getStatus() { return status; }
     public String getMatchedStudentCode() { return matchedStudentCode; }
     public String getMatchedStudentName() { return matchedStudentName; }
@@ -95,6 +106,13 @@ public class ImportPreviewItem {
     public void setReceivedBy(String receivedBy) { this.receivedBy = receivedBy; }
     public void setRemarks(String remarks) { this.remarks = remarks; }
     public void setRemittanceDate(LocalDate remittanceDate) { this.remittanceDate = remittanceDate; }
+    public void setReceiptAcademicYear(String receiptAcademicYear) {
+        this.receiptAcademicYear = new ReceiptKey(1, receiptAcademicYear, getReceiptTerm()).academicYear();
+    }
+    public void setReceiptTerm(ChargeAcademicTerm receiptTerm) {
+        this.receiptTerm = receiptTerm != null ? receiptTerm : ChargeAcademicTerm.UNASSIGNED;
+    }
+    public void setSourceFileName(String sourceFileName) { this.sourceFileName = sourceFileName; }
     public void setStatus(String status) { this.status = status; }
     public void setMatchedStudentCode(String matchedStudentCode) { this.matchedStudentCode = matchedStudentCode; }
     public void setMatchedStudentName(String matchedStudentName) { this.matchedStudentName = matchedStudentName; }
@@ -123,7 +141,7 @@ public class ImportPreviewItem {
 
     @Override
     public String toString() {
-        return String.format("ImportPreviewItem[row=%d, receipt=%d, name=%s, status=%s, matched=%s]",
-            rowNumber, receiptNumber, studentName, status, matchedStudentCode);
+        return String.format("ImportPreviewItem[file=%s, row=%d, receipt=%d, scope=%s, name=%s, status=%s, matched=%s]",
+            sourceFileName, rowNumber, receiptNumber, getReceiptKey().displayScope(), studentName, status, matchedStudentCode);
     }
 }

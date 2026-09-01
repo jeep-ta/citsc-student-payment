@@ -599,26 +599,33 @@ public class SettingsPanel extends JPanel {
                 // Export payments
                 File paymentFile = new File(exportDir, "payments_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")) + ".csv");
                 try (var writer = new java.io.PrintWriter(paymentFile)) {
-                    writer.println("Receipt Number,Student ID,Name,Program,Intel Fee,T-Shirt,Penalties,CIT Night,Received By,Remarks,Remittance Date,Status,Created At,Updated At");
+                    writer.println("Receipt Number,Student ID,Name,Program,Intel Fee,T-Shirt,Penalties,CIT Night,Received By,Remarks,Remittance Date,Receipt Academic Year,Receipt Term,Charge Academic Year,Charge Term,Import Batch,Source File,Source Row,Status,Created At,Updated At");
                     List<Payment> payments = db.getAllPayments();
                     DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
                     for (Payment p : payments) {
-                        writer.printf("%d,%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%s,%s,%s,%s,%s,%s%n",
-                            p.getReceiptNumber(),
+                        writer.println(String.join(",", new String[]{
+                            String.valueOf(p.getReceiptNumber()),
                             escapeCsv(p.getStudentId()),
                             escapeCsv(p.getName()),
                             escapeCsv(p.getProgram()),
-                            p.getIntelFee() != null ? p.getIntelFee() : 0,
-                            p.getTshirtSizing() != null ? p.getTshirtSizing() : 0,
-                            p.getPenalties() != null ? p.getPenalties() : 0,
-                            p.getCitNight() != null ? p.getCitNight() : 0,
+                            String.format(java.util.Locale.ROOT, "%.2f", p.getIntelFee() != null ? p.getIntelFee() : 0),
+                            String.format(java.util.Locale.ROOT, "%.2f", p.getTshirtSizing() != null ? p.getTshirtSizing() : 0),
+                            String.format(java.util.Locale.ROOT, "%.2f", p.getPenalties() != null ? p.getPenalties() : 0),
+                            String.format(java.util.Locale.ROOT, "%.2f", p.getCitNight() != null ? p.getCitNight() : 0),
                             escapeCsv(p.getReceivedBy()),
                             escapeCsv(p.getRemarks()),
                             p.getRemittanceDate() != null ? p.getRemittanceDate().format(fmt) : "",
+                            escapeCsv(p.getReceiptAcademicYear()),
+                            escapeCsv(p.getReceiptTermCode()),
+                            escapeCsv(p.getAcademicYear()),
+                            escapeCsv(p.getChargeAcademicTermCode()),
+                            escapeCsv(p.getImportBatchCode()),
+                            escapeCsv(p.getImportSourceFile()),
+                            p.getImportSourceRow() != null ? String.valueOf(p.getImportSourceRow()) : "",
                             escapeCsv(p.getStatus()),
-                            p.getCreatedAt(),
-                            p.getUpdatedAt()
-                        );
+                            String.valueOf(p.getCreatedAt()),
+                            String.valueOf(p.getUpdatedAt())
+                        }));
                     }
                 }
 

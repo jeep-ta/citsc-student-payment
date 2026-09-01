@@ -22,6 +22,7 @@ public class StudentMergeRecord {
     private String targetStudentCode;
     private String targetName;
     private String paymentReceipts; // comma-separated receipt numbers
+    private String paymentIds;      // stable primary keys used for safe undo
     private LocalDateTime mergedAt;
     private String mergedBy;
     private String reason;
@@ -67,6 +68,8 @@ public class StudentMergeRecord {
 
     public String getPaymentReceipts() { return paymentReceipts; }
     public void setPaymentReceipts(String paymentReceipts) { this.paymentReceipts = paymentReceipts; }
+    public String getPaymentIds() { return paymentIds; }
+    public void setPaymentIds(String paymentIds) { this.paymentIds = paymentIds; }
 
     public List<Integer> getReceiptNumbersList() {
         if (paymentReceipts == null || paymentReceipts.trim().isEmpty()) {
@@ -87,6 +90,21 @@ public class StudentMergeRecord {
                 .map(String::valueOf)
                 .collect(Collectors.joining(","));
         }
+    }
+
+    public List<Integer> getPaymentIdsList() {
+        if (paymentIds == null || paymentIds.trim().isEmpty()) return new ArrayList<>();
+        return Arrays.stream(paymentIds.split(","))
+            .map(String::trim)
+            .filter(s -> !s.isEmpty())
+            .map(Integer::parseInt)
+            .collect(Collectors.toList());
+    }
+
+    public void setPaymentIdsList(List<Integer> ids) {
+        this.paymentIds = ids == null || ids.isEmpty() ? "" : ids.stream()
+            .map(String::valueOf)
+            .collect(Collectors.joining(","));
     }
 
     public LocalDateTime getMergedAt() { return mergedAt; }

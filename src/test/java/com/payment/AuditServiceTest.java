@@ -48,6 +48,7 @@ public class AuditServiceTest {
              var stmt = conn.createStatement()) {
             stmt.execute("DELETE FROM payments");
             stmt.execute("DELETE FROM students");
+            stmt.execute("DELETE FROM import_batch_files");
             stmt.execute("DELETE FROM import_batches");
             stmt.execute("DELETE FROM audit_logs");
         }

@@ -193,9 +193,10 @@ public class DataQualityPanel extends JPanel {
         if (issue == null || !"PAYMENT".equals(issue.entity)) return;
 
         try {
-            int receiptNumber = Integer.parseInt(issue.entityId);
-            db.updatePaymentChargeTerm(receiptNumber, term, "Fixed via Data Quality Panel", "user");
-            JOptionPane.showMessageDialog(this, "Receipt #" + receiptNumber + " assigned to " + term.getLabel(), "Term Assigned", JOptionPane.INFORMATION_MESSAGE);
+            int paymentId = Integer.parseInt(issue.entityId);
+            Payment payment = db.findPaymentById(paymentId).orElseThrow();
+            db.updatePaymentChargeTermById(paymentId, term, "Fixed via Data Quality Panel", "user");
+            JOptionPane.showMessageDialog(this, "Receipt #" + payment.getReceiptNumber() + " assigned to " + term.getLabel(), "Term Assigned", JOptionPane.INFORMATION_MESSAGE);
             scanForIssues();
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Error assigning term: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
@@ -212,7 +213,14 @@ public class DataQualityPanel extends JPanel {
         Window window = SwingUtilities.getWindowAncestor(this);
         if (window instanceof MainFrame mainFrame) {
             if ("PAYMENT".equals(issue.entity)) {
-                mainFrame.showPaymentsForStudent(issue.entityId);
+                try {
+                    int paymentId = Integer.parseInt(issue.entityId);
+                    db.findPaymentById(paymentId)
+                        .ifPresent(payment -> mainFrame.showPaymentsForStudent(payment.getStudentId()));
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(this, "Could not open payment: " + ex.getMessage(),
+                        "Navigation Error", JOptionPane.ERROR_MESSAGE);
+                }
             } else if ("STUDENT".equals(issue.entity)) {
                 mainFrame.navigateTo("Students");
             }
@@ -260,11 +268,13 @@ public class DataQualityPanel extends JPanel {
 
                 // 2. Check for receipt conflicts
                 List<Payment> payments = db.getAllPayments();
-                Map<Integer, List<Payment>> byReceipt = payments.stream()
-                    .collect(Collectors.groupingBy(Payment::getReceiptNumber));
+                Map<com.payment.ReceiptKey, List<Payment>> byReceipt = payments.stream()
+                    .filter(p -> p.getReceiptKey().hasDefinedScope())
+                    .collect(Collectors.groupingBy(Payment::getReceiptKey));
 
-                for (Map.Entry<Integer, List<Payment>> entry : byReceipt.entrySet()) {
+                for (Map.Entry<com.payment.ReceiptKey, List<Payment>> entry : byReceipt.entrySet()) {
                     if (entry.getValue().size() > 1) {
+                        com.payment.ReceiptKey receiptKey = entry.getKey();
                         double firstAmount = entry.getValue().get(0).getTotalAmount();
                         boolean hasConflict = entry.getValue().stream()
                             .anyMatch(p -> Math.abs(p.getTotalAmount() - firstAmount) > 0.01);
@@ -277,8 +287,9 @@ public class DataQualityPanel extends JPanel {
                                 QualityIssue.Severity.ERROR,
                                 "Receipt Conflict",
                                 "PAYMENT",
-                                String.valueOf(entry.getKey()),
-                                String.format("Receipt %d has conflicting amounts: %s", entry.getKey(), details),
+                                String.valueOf(entry.getValue().get(0).getId()),
+                                String.format("Receipt %d in %s has conflicting amounts: %s",
+                                    receiptKey.receiptNumber(), receiptKey.displayScope(), details),
                                 "OPEN"
                             ));
                         } else {
@@ -286,8 +297,9 @@ public class DataQualityPanel extends JPanel {
                                 QualityIssue.Severity.INFO,
                                 "Duplicate Receipt (Same Amount)",
                                 "PAYMENT",
-                                String.valueOf(entry.getKey()),
-                                String.format("Receipt %d appears %d times with same amount", entry.getKey(), entry.getValue().size()),
+                                String.valueOf(entry.getValue().get(0).getId()),
+                                String.format("Receipt %d in %s appears %d times with same amount",
+                                    receiptKey.receiptNumber(), receiptKey.displayScope(), entry.getValue().size()),
                                 "OPEN"
                             ));
                         }
@@ -296,50 +308,55 @@ public class DataQualityPanel extends JPanel {
 
                 // 3. Check for invalid payment records
                 for (Payment p : payments) {
+                    if (!p.getReceiptKey().hasDefinedScope()) {
+                        issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Missing Receipt Period", "PAYMENT",
+                            String.valueOf(p.getId()),
+                            String.format("Receipt %d has no issuance academic year/semester", p.getReceiptNumber()), "OPEN"));
+                    }
                     if (p.getTotalAmount() < 0) {
                         issues.add(new QualityIssue(QualityIssue.Severity.ERROR, "Negative Total Amount", "PAYMENT",
-                            String.valueOf(p.getReceiptNumber()),
+                            String.valueOf(p.getId()),
                             String.format("Receipt %d has negative total: ₱%,.2f", p.getReceiptNumber(), p.getTotalAmount()), "OPEN"));
                     }
                     if (p.getIntelFee() != null && p.getIntelFee() < 0) {
                         issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Negative Intel Fee", "PAYMENT",
-                            String.valueOf(p.getReceiptNumber()),
+                            String.valueOf(p.getId()),
                             String.format("Receipt %d has negative Intel Fee: ₱%,.2f", p.getReceiptNumber(), p.getIntelFee()), "OPEN"));
                     }
                     if (p.getTshirtSizing() != null && p.getTshirtSizing() < 0) {
                         issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Negative T-Shirt Fee", "PAYMENT",
-                            String.valueOf(p.getReceiptNumber()),
+                            String.valueOf(p.getId()),
                             String.format("Receipt %d has negative T-Shirt Fee: ₱%,.2f", p.getReceiptNumber(), p.getTshirtSizing()), "OPEN"));
                     }
                     if (p.getPenalties() != null && p.getPenalties() < 0) {
                         issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Negative Penalties", "PAYMENT",
-                            String.valueOf(p.getReceiptNumber()),
+                            String.valueOf(p.getId()),
                             String.format("Receipt %d has negative Penalties: ₱%,.2f", p.getReceiptNumber(), p.getPenalties()), "OPEN"));
                     }
                     if (p.getCitNight() != null && p.getCitNight() < 0) {
                         issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Negative CIT Night Fee", "PAYMENT",
-                            String.valueOf(p.getReceiptNumber()),
+                            String.valueOf(p.getId()),
                             String.format("Receipt %d has negative CIT Night Fee: ₱%,.2f", p.getReceiptNumber(), p.getCitNight()), "OPEN"));
                     }
                     if (p.getProgram() == null || p.getProgram().trim().isEmpty()) {
                         issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Missing Program", "PAYMENT",
-                            String.valueOf(p.getReceiptNumber()),
+                            String.valueOf(p.getId()),
                             String.format("Receipt %d has no program assigned", p.getReceiptNumber()), "OPEN"));
                     }
                     if (p.getReceivedBy() == null || p.getReceivedBy().trim().isEmpty()) {
                         issues.add(new QualityIssue(QualityIssue.Severity.INFO, "Missing Receiver", "PAYMENT",
-                            String.valueOf(p.getReceiptNumber()),
+                            String.valueOf(p.getId()),
                             String.format("Receipt %d has no receiver recorded", p.getReceiptNumber()), "OPEN"));
                     }
                     if (p.getRemittanceDate() == null) {
                         issues.add(new QualityIssue(QualityIssue.Severity.INFO, "Missing Remittance Date", "PAYMENT",
-                            String.valueOf(p.getReceiptNumber()),
+                            String.valueOf(p.getId()),
                             String.format("Receipt %d has no remittance date", p.getReceiptNumber()), "OPEN"));
                     }
                     if (ChargeAcademicTerm.isTermEligibleCategory(p.getCitNight(), p.getPenalties()) &&
                         (p.getChargeAcademicTerm() == null || p.getChargeAcademicTerm() == ChargeAcademicTerm.UNASSIGNED)) {
                         issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Unassigned Charge Term", "PAYMENT",
-                            String.valueOf(p.getReceiptNumber()),
+                            String.valueOf(p.getId()),
                             String.format("Receipt %d has CIT Night/Penalty amount but UNASSIGNED charge term", p.getReceiptNumber()), "OPEN"));
                     }
                 }

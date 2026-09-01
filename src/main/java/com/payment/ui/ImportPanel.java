@@ -1,6 +1,7 @@
 package com.payment.ui;
 
 import com.payment.ImportBatch;
+import com.payment.ImportBatchFile;
 import com.payment.ImportService;
 import com.payment.database.DatabaseManager;
 
@@ -71,17 +72,19 @@ public class ImportPanel extends JPanel {
         // Column widths
         batchTable.getColumnModel().getColumn(0).setPreferredWidth(120);
         batchTable.getColumnModel().getColumn(1).setPreferredWidth(200);
-        batchTable.getColumnModel().getColumn(2).setPreferredWidth(130);
-        batchTable.getColumnModel().getColumn(3).setPreferredWidth(100);
-        batchTable.getColumnModel().getColumn(4).setPreferredWidth(80);
-        batchTable.getColumnModel().getColumn(5).setPreferredWidth(80);
-        batchTable.getColumnModel().getColumn(6).setPreferredWidth(80);
-        batchTable.getColumnModel().getColumn(7).setPreferredWidth(80);
-        batchTable.getColumnModel().getColumn(8).setPreferredWidth(80);
-        batchTable.getColumnModel().getColumn(9).setPreferredWidth(100);
+        batchTable.getColumnModel().getColumn(2).setPreferredWidth(50);
+        batchTable.getColumnModel().getColumn(3).setPreferredWidth(160);
+        batchTable.getColumnModel().getColumn(4).setPreferredWidth(130);
+        batchTable.getColumnModel().getColumn(5).setPreferredWidth(100);
+        batchTable.getColumnModel().getColumn(6).setPreferredWidth(70);
+        batchTable.getColumnModel().getColumn(7).setPreferredWidth(70);
+        batchTable.getColumnModel().getColumn(8).setPreferredWidth(70);
+        batchTable.getColumnModel().getColumn(9).setPreferredWidth(70);
+        batchTable.getColumnModel().getColumn(10).setPreferredWidth(70);
+        batchTable.getColumnModel().getColumn(11).setPreferredWidth(100);
 
         // Custom renderer for status
-        batchTable.getColumnModel().getColumn(9).setCellRenderer(new StatusCellRenderer());
+        batchTable.getColumnModel().getColumn(11).setCellRenderer(new StatusCellRenderer());
 
         JScrollPane scrollPane = new JScrollPane(batchTable);
         scrollPane.setBorder(BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1));
@@ -141,9 +144,22 @@ public class ImportPanel extends JPanel {
     private void showBatchDetails(int modelRow) {
         ImportBatch batch = batchTableModel.getBatch(modelRow);
 
+        StringBuilder fileDetails = new StringBuilder();
+        try {
+            for (ImportBatchFile file : db.getImportBatchFiles(batch.getBatchCode())) {
+                fileDetails.append(String.format("\n  • %s [%s] — %d rows, %d new, %d duplicate, %d conflict, %d error",
+                    file.getFileName(), file.getReceiptPeriodDisplay(), file.getTotalRows(), file.getNewRecords(),
+                    file.getDuplicateRecords(), file.getConflictRecords(), file.getErrorRecords()));
+            }
+        } catch (Exception ignored) {
+            fileDetails.append("\n  File details unavailable");
+        }
+
         String details = String.format(
             "Batch Code: %s\n" +
-            "File: %s\n" +
+            "Source: %s\n" +
+            "Files: %d%s\n" +
+            "Receipt Period: %s\n" +
             "Imported By: %s\n" +
             "Imported At: %s\n" +
             "Remittance Date: %s\n" +
@@ -155,6 +171,9 @@ public class ImportPanel extends JPanel {
             "Status: %s",
             batch.getBatchCode(),
             batch.getFileName(),
+            batch.getFileCount(),
+            fileDetails,
+            batch.getReceiptPeriodDisplay(),
             batch.getImportedBy(),
             batch.getImportedAt() != null ? batch.getImportedAt().format(DateTimeFormatter.ofPattern("MMM dd, yyyy HH:mm")) : "-",
             batch.getRemittanceDate() != null ? batch.getRemittanceDate().format(DateTimeFormatter.ofPattern("MMM dd, yyyy")) : "-",
@@ -173,7 +192,7 @@ public class ImportPanel extends JPanel {
 
     private static class BatchTableModel extends AbstractTableModel {
         private static final String[] COLUMNS = {
-            "Batch Code", "File", "Imported At", "Remittance Date",
+            "Batch Code", "Source", "Files", "Receipt Period", "Imported At", "Remittance Date",
             "Records", "New", "Duplicates", "Conflicts", "Errors", "Status"
         };
         private List<ImportBatch> batches = List.of();
@@ -199,21 +218,23 @@ public class ImportPanel extends JPanel {
             switch (columnIndex) {
                 case 0: return b.getBatchCode();
                 case 1: return b.getFileName();
-                case 2: return b.getImportedAt() != null ? b.getImportedAt().format(dateFormat) : "-";
-                case 3: return b.getRemittanceDate() != null ? b.getRemittanceDate().format(remittanceFormat) : "-";
-                case 4: return b.getTotalRows();
-                case 5: return b.getNewRecords();
-                case 6: return b.getDuplicateRecords();
-                case 7: return b.getConflictRecords();
-                case 8: return b.getErrorRecords();
-                case 9: return b.getStatus();
+                case 2: return b.getFileCount();
+                case 3: return b.getReceiptPeriodDisplay();
+                case 4: return b.getImportedAt() != null ? b.getImportedAt().format(dateFormat) : "-";
+                case 5: return b.getRemittanceDate() != null ? b.getRemittanceDate().format(remittanceFormat) : "-";
+                case 6: return b.getTotalRows();
+                case 7: return b.getNewRecords();
+                case 8: return b.getDuplicateRecords();
+                case 9: return b.getConflictRecords();
+                case 10: return b.getErrorRecords();
+                case 11: return b.getStatus();
                 default: return null;
             }
         }
 
         @Override
         public Class<?> getColumnClass(int columnIndex) {
-            if (columnIndex >= 4 && columnIndex <= 8) return Integer.class;
+            if (columnIndex == 2 || (columnIndex >= 6 && columnIndex <= 10)) return Integer.class;
             return String.class;
         }
     }

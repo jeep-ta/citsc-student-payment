@@ -80,6 +80,8 @@ public class ExcelImporter {
                         receivedBy, remarks);
                 payment.setRemittanceDate(remittanceDate);
                 payment.setChargeAcademicTerm(chargeTerm);
+                payment.setImportSourceFile(new File(filePath).getName());
+                payment.setImportSourceRow(i + 1);
                 student.addPayment(payment);
             }
         }

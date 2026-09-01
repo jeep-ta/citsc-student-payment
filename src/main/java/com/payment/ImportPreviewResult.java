@@ -10,10 +10,16 @@ public class ImportPreviewResult {
 
     private List<ImportPreviewItem> items;
     private ImportBatch batch;
+    private List<ImportBatchFile> files;
 
     public ImportPreviewResult(List<ImportPreviewItem> items, ImportBatch batch) {
+        this(items, batch, List.of());
+    }
+
+    public ImportPreviewResult(List<ImportPreviewItem> items, ImportBatch batch, List<ImportBatchFile> files) {
         this.items = items;
         this.batch = batch;
+        this.files = files != null ? files : List.of();
     }
 
     public List<ImportPreviewItem> getItems() {
@@ -31,6 +37,13 @@ public class ImportPreviewResult {
     public void setBatch(ImportBatch batch) {
         this.batch = batch;
     }
+
+    public List<ImportBatchFile> getFiles() { return files; }
+    public void setFiles(List<ImportBatchFile> files) {
+        this.files = files != null ? files : List.of();
+    }
+
+    public int getFileCount() { return files.size(); }
 
     // --- Summary getters ---
     public int getTotalItems() {

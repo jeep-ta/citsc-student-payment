@@ -16,6 +16,9 @@ public class ImportBatch {
     private int id;
     private String batchCode;          // e.g., IMP-2026-0001
     private String fileName;
+    private int fileCount;
+    private String receiptAcademicYear;
+    private ChargeAcademicTerm receiptTerm;
     private LocalDate remittanceDate;
     private LocalDateTime importedAt;
     private String importedBy;
@@ -30,6 +33,7 @@ public class ImportBatch {
 
     public ImportBatch(String fileName, LocalDate remittanceDate, String importedBy) {
         this.fileName = fileName;
+        this.fileCount = fileName != null && !fileName.isBlank() ? 1 : 0;
         this.remittanceDate = remittanceDate;
         this.importedBy = importedBy;
         this.importedAt = LocalDateTime.now();
@@ -61,6 +65,20 @@ public class ImportBatch {
 
     public String getFileName() {
         return fileName;
+    }
+
+    public int getFileCount() { return fileCount; }
+    public String getReceiptAcademicYear() { return receiptAcademicYear; }
+    public ChargeAcademicTerm getReceiptTerm() {
+        return receiptTerm != null ? receiptTerm : ChargeAcademicTerm.UNASSIGNED;
+    }
+    public ReceiptKey getReceiptKey(int receiptNumber) {
+        return new ReceiptKey(receiptNumber, receiptAcademicYear, getReceiptTerm());
+    }
+    public String getReceiptPeriodDisplay() {
+        ReceiptKey key = getReceiptKey(1);
+        if (key.hasDefinedScope()) return key.displayScope();
+        return fileCount > 1 ? "Multiple periods" : "Unassigned";
     }
 
     public LocalDate getRemittanceDate() {
@@ -118,6 +136,14 @@ public class ImportBatch {
 
     public void setFileName(String fileName) {
         this.fileName = fileName;
+    }
+
+    public void setFileCount(int fileCount) { this.fileCount = Math.max(0, fileCount); }
+    public void setReceiptAcademicYear(String receiptAcademicYear) {
+        this.receiptAcademicYear = new ReceiptKey(1, receiptAcademicYear, getReceiptTerm()).academicYear();
+    }
+    public void setReceiptTerm(ChargeAcademicTerm receiptTerm) {
+        this.receiptTerm = receiptTerm != null ? receiptTerm : ChargeAcademicTerm.UNASSIGNED;
     }
 
     public void setRemittanceDate(LocalDate remittanceDate) {
@@ -189,8 +215,9 @@ public class ImportBatch {
     @Override
     public String toString() {
         return String.format(
-            "ImportBatch{batchCode='%s', file='%s', date=%s, rows=%d, new=%d, dup=%d, conflict=%d, error=%d, status='%s'}",
-            batchCode, fileName, remittanceDate, totalRows, newRecords, duplicateRecords, conflictRecords, errorRecords, status
+            "ImportBatch{batchCode='%s', files=%d, scope='%s/%s', date=%s, rows=%d, new=%d, dup=%d, conflict=%d, error=%d, status='%s'}",
+            batchCode, fileCount, receiptAcademicYear, getReceiptTerm().getCode(), remittanceDate,
+            totalRows, newRecords, duplicateRecords, conflictRecords, errorRecords, status
         );
     }
 }

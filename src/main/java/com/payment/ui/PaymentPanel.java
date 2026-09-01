@@ -153,8 +153,10 @@ public class PaymentPanel extends JPanel {
         paymentTable.getColumnModel().getColumn(10).setPreferredWidth(85);  // Received By
         paymentTable.getColumnModel().getColumn(11).setPreferredWidth(100); // AY
         paymentTable.getColumnModel().getColumn(12).setPreferredWidth(115); // Charge Term
-        paymentTable.getColumnModel().getColumn(13).setPreferredWidth(70);  // Status
-        paymentTable.getColumnModel().getColumn(14).setPreferredWidth(90);  // Total
+        paymentTable.getColumnModel().getColumn(13).setPreferredWidth(100); // Receipt AY
+        paymentTable.getColumnModel().getColumn(14).setPreferredWidth(110); // Receipt Term
+        paymentTable.getColumnModel().getColumn(15).setPreferredWidth(70);  // Status
+        paymentTable.getColumnModel().getColumn(16).setPreferredWidth(90);  // Total
 
         // Custom renderers
         CurrencyCellRenderer currencyRenderer = new CurrencyCellRenderer();
@@ -162,8 +164,8 @@ public class PaymentPanel extends JPanel {
         paymentTable.getColumnModel().getColumn(7).setCellRenderer(currencyRenderer);
         paymentTable.getColumnModel().getColumn(8).setCellRenderer(currencyRenderer);
         paymentTable.getColumnModel().getColumn(9).setCellRenderer(currencyRenderer);
-        paymentTable.getColumnModel().getColumn(14).setCellRenderer(currencyRenderer);
-        paymentTable.getColumnModel().getColumn(13).setCellRenderer(new StatusCellRenderer());
+        paymentTable.getColumnModel().getColumn(16).setCellRenderer(currencyRenderer);
+        paymentTable.getColumnModel().getColumn(15).setCellRenderer(new StatusCellRenderer());
 
         DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
         centerRenderer.setHorizontalAlignment(SwingConstants.CENTER);
@@ -172,6 +174,8 @@ public class PaymentPanel extends JPanel {
         paymentTable.getColumnModel().getColumn(5).setCellRenderer(centerRenderer);
         paymentTable.getColumnModel().getColumn(11).setCellRenderer(centerRenderer);
         paymentTable.getColumnModel().getColumn(12).setCellRenderer(centerRenderer);
+        paymentTable.getColumnModel().getColumn(13).setCellRenderer(centerRenderer);
+        paymentTable.getColumnModel().getColumn(14).setCellRenderer(centerRenderer);
 
         // Editor for Academic Year column
         JComboBox<String> yearCombo = new JComboBox<>(new String[]{
@@ -190,6 +194,19 @@ public class PaymentPanel extends JPanel {
             ChargeAcademicTerm.UNASSIGNED.getLabel()
         });
         paymentTable.getColumnModel().getColumn(12).setCellEditor(new DefaultCellEditor(termComboBox));
+
+        JComboBox<String> receiptYearCombo = new JComboBox<>(new String[]{
+            "2024-2025", "2025-2026", "2026-2027", "2027-2028"
+        });
+        receiptYearCombo.setEditable(true);
+        paymentTable.getColumnModel().getColumn(13).setCellEditor(new DefaultCellEditor(receiptYearCombo));
+
+        JComboBox<String> receiptTermCombo = new JComboBox<>(new String[]{
+            ChargeAcademicTerm.FIRST_SEM.getLabel(),
+            ChargeAcademicTerm.SECOND_SEM.getLabel(),
+            ChargeAcademicTerm.SUMMER.getLabel()
+        });
+        paymentTable.getColumnModel().getColumn(14).setCellEditor(new DefaultCellEditor(receiptTermCombo));
 
         // Real-time filtering listeners with debounce
         javax.swing.Timer filterDebounceTimer = new javax.swing.Timer(150, e -> filterPayments());
@@ -579,7 +596,7 @@ public class PaymentPanel extends JPanel {
 
         if (reason != null && !reason.trim().isEmpty()) {
             try {
-                db.voidPayment(p.getReceiptNumber(), reason.trim(), "user");
+                db.voidPaymentById(p.getId(), reason.trim(), "user");
                 refreshData();
                 JOptionPane.showMessageDialog(this, "Receipt #" + p.getReceiptNumber() + " has been voided.", "Payment Voided", JOptionPane.INFORMATION_MESSAGE);
             } catch (Exception ex) {
@@ -602,7 +619,7 @@ public class PaymentPanel extends JPanel {
 
         if (reason != null && !reason.trim().isEmpty()) {
             try {
-                db.unvoidPayment(p.getReceiptNumber(), reason.trim(), "user");
+                db.unvoidPaymentById(p.getId(), reason.trim(), "user");
                 refreshData();
                 JOptionPane.showMessageDialog(this, "Receipt #" + p.getReceiptNumber() + " has been reactivated.", "Payment Reactivated", JOptionPane.INFORMATION_MESSAGE);
             } catch (Exception ex) {
@@ -750,10 +767,10 @@ public class PaymentPanel extends JPanel {
             filters.add(RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(term), 12));
         }
 
-        // Status filter (Column 13)
+        // Status filter (Column 15)
         String status = (String) statusFilter.getSelectedItem();
         if (status != null && !"All".equals(status)) {
-            filters.add(RowFilter.regexFilter("^" + status + "$", 13));
+            filters.add(RowFilter.regexFilter("^" + status + "$", 15));
         }
 
         if (filters.isEmpty()) {
@@ -773,7 +790,8 @@ public class PaymentPanel extends JPanel {
         private static final String[] COLUMNS = {
             "#", "Receipt #", "Student Code", "Student Name", "Program",
             "Remittance Date", "Intel Fee", "T-Shirt", "Penalties", "CIT Night",
-            "Received By", "Academic Year", "Charge Term", "Status", "Total"
+            "Received By", "Academic Year", "Charge Term", "Receipt AY", "Receipt Term",
+            "Status", "Total"
         };
         private List<Payment> payments = List.of();
         private final DateTimeFormatter dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -807,7 +825,7 @@ public class PaymentPanel extends JPanel {
 
         @Override
         public boolean isCellEditable(int rowIndex, int columnIndex) {
-            return columnIndex == 11 || columnIndex == 12;
+            return columnIndex == 11 || columnIndex == 12 || columnIndex == 13 || columnIndex == 14;
         }
 
         @Override
@@ -834,6 +852,28 @@ public class PaymentPanel extends JPanel {
                     fireTableCellUpdated(rowIndex, columnIndex);
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(PaymentPanel.this, "Error updating charge term: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            } else if (columnIndex == 13) {
+                String receiptYear = aValue != null ? aValue.toString().trim() : null;
+                try {
+                    db.updatePaymentReceiptScope(p.getId(), receiptYear, p.getReceiptTerm(),
+                        "Edited receipt period in Payments Table", "user");
+                    p.setReceiptAcademicYear(receiptYear);
+                    fireTableCellUpdated(rowIndex, columnIndex);
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(PaymentPanel.this,
+                        "Error updating receipt period: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            } else if (columnIndex == 14) {
+                ChargeAcademicTerm receiptTerm = ChargeAcademicTerm.fromCode(String.valueOf(aValue));
+                try {
+                    db.updatePaymentReceiptScope(p.getId(), p.getReceiptAcademicYear(), receiptTerm,
+                        "Edited receipt period in Payments Table", "user");
+                    p.setReceiptTerm(receiptTerm);
+                    fireTableCellUpdated(rowIndex, columnIndex);
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(PaymentPanel.this,
+                        "Error updating receipt period: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
         }
@@ -862,8 +902,11 @@ public class PaymentPanel extends JPanel {
                     ChargeAcademicTerm term = p.getChargeAcademicTerm();
                     return term != null ? term.getLabel() : "Unassigned";
                 }
-                case 13: return p.getStatus() != null ? p.getStatus() : "ACTIVE";
-                case 14: return p.getTotalAmount();
+                case 13: return p.getReceiptAcademicYear() != null ? p.getReceiptAcademicYear() : "-";
+                case 14: return p.getReceiptTerm() != ChargeAcademicTerm.UNASSIGNED
+                    ? p.getReceiptTerm().getLabel() : "Unassigned";
+                case 15: return p.getStatus() != null ? p.getStatus() : "ACTIVE";
+                case 16: return p.getTotalAmount();
                 default: return null;
             }
         }
@@ -872,7 +915,7 @@ public class PaymentPanel extends JPanel {
         public Class<?> getColumnClass(int columnIndex) {
             if (columnIndex == 0 || columnIndex == 1) return Integer.class;
             if (columnIndex >= 6 && columnIndex <= 9) return Double.class;
-            if (columnIndex == 14) return Double.class;
+            if (columnIndex == 16) return Double.class;
             return String.class;
         }
     }

@@ -78,19 +78,25 @@ public class StudentMergeAndTermTest {
         p1.setStudentId(source.getStudentCode());
         p1.setRemittanceDate(LocalDate.now());
         p1.setStatus("ACTIVE");
+        p1.setReceiptAcademicYear("2026-2027");
+        p1.setReceiptTerm(ChargeAcademicTerm.FIRST_SEM);
         db.insertPayment(p1);
 
         Payment p2 = new Payment(1002, "DELA CRUS, JUAN", "BSIT", 0.0, 200.0, 0.0, 0.0, "Treasurer", "Payment 2");
         p2.setStudentId(source.getStudentCode());
         p2.setRemittanceDate(LocalDate.now());
         p2.setStatus("ACTIVE");
+        p2.setReceiptAcademicYear("2026-2027");
+        p2.setReceiptTerm(ChargeAcademicTerm.FIRST_SEM);
         db.insertPayment(p2);
 
-        // Target also has 1 payment
-        Payment p3 = new Payment(1003, "DELA CRUZ, JUAN", "BSIT", 50.0, 0.0, 0.0, 0.0, "Treasurer", "Payment 3");
+        // Target also has a payment whose receipt number was reused next semester.
+        Payment p3 = new Payment(1001, "DELA CRUZ, JUAN", "BSIT", 50.0, 0.0, 0.0, 0.0, "Treasurer", "Payment 3");
         p3.setStudentId(target.getStudentCode());
         p3.setRemittanceDate(LocalDate.now());
         p3.setStatus("ACTIVE");
+        p3.setReceiptAcademicYear("2026-2027");
+        p3.setReceiptTerm(ChargeAcademicTerm.SECOND_SEM);
         db.insertPayment(p3);
 
         assertEquals(2, db.getPaymentsByStudent(source.getStudentCode()).size());
@@ -103,6 +109,7 @@ public class StudentMergeAndTermTest {
         assertNotNull(mergeRecord);
         assertEquals("ACTIVE", mergeRecord.getStatus());
         assertEquals(2, mergeRecord.getReceiptNumbersList().size());
+        assertEquals(2, mergeRecord.getPaymentIdsList().size());
 
         // Source student should be deleted from active table
         Optional<Student> optSource = db.getStudentByCode(source.getStudentCode());
@@ -124,6 +131,8 @@ public class StudentMergeAndTermTest {
         // Payments are back to their original owners
         assertEquals(2, db.getPaymentsByStudent(source.getStudentCode()).size());
         assertEquals(1, db.getPaymentsByStudent(target.getStudentCode()).size());
+        assertEquals(ChargeAcademicTerm.SECOND_SEM,
+            db.getPaymentsByStudent(target.getStudentCode()).get(0).getReceiptTerm());
 
         // Merge record status is now REVERTED
         List<StudentMergeRecord> allMerges = db.getAllStudentMerges();

@@ -2,7 +2,9 @@ package com.payment.database;
 
 import com.payment.ChargeAcademicTerm;
 import com.payment.ImportBatch;
+import com.payment.ImportBatchFile;
 import com.payment.Payment;
+import com.payment.ReceiptKey;
 import com.payment.Student;
 import com.payment.StudentMergeRecord;
 
@@ -20,6 +22,7 @@ import java.util.stream.Collectors;
 public class DatabaseManager {
     private static final String DB_FILE = "student_payment.db";
     private static final String DEFAULT_JDBC_URL = "jdbc:sqlite:" + DB_FILE;
+    private static final int SQLITE_BIND_BATCH_SIZE = 900;
     private static String customJdbcUrl = null;
 
     // Singleton instance
@@ -129,6 +132,11 @@ public class DatabaseManager {
             "    charge_academic_term TEXT NOT NULL DEFAULT 'UNASSIGNED'," +
             "    academic_year TEXT," +
             "    status TEXT NOT NULL DEFAULT 'ACTIVE'," +
+            "    receipt_academic_year TEXT," +
+            "    receipt_term TEXT," +
+            "    import_batch_code TEXT," +
+            "    import_source_file TEXT," +
+            "    import_source_row INTEGER," +
             "    created_at TEXT NOT NULL," +
             "    updated_at TEXT NOT NULL," +
             "    FOREIGN KEY (student_id) REFERENCES students(student_code)" +
@@ -144,6 +152,9 @@ public class DatabaseManager {
             "    id INTEGER PRIMARY KEY AUTOINCREMENT," +
             "    batch_code TEXT NOT NULL UNIQUE," +
             "    file_name TEXT NOT NULL," +
+            "    file_count INTEGER NOT NULL DEFAULT 1," +
+            "    receipt_academic_year TEXT," +
+            "    receipt_term TEXT," +
             "    remittance_date TEXT," +
             "    imported_at TEXT NOT NULL," +
             "    imported_by TEXT," +
@@ -198,6 +209,7 @@ public class DatabaseManager {
             "    target_student_code TEXT NOT NULL," +
             "    target_name TEXT NOT NULL," +
             "    payment_receipts TEXT NOT NULL," +
+            "    payment_ids TEXT," +
             "    merged_at TEXT NOT NULL," +
             "    merged_by TEXT," +
             "    reason TEXT," +
@@ -255,6 +267,77 @@ public class DatabaseManager {
                 }
             }
 
+            String[][] paymentColumns = {
+                {"receipt_academic_year", "TEXT"},
+                {"receipt_term", "TEXT"},
+                {"import_batch_code", "TEXT"},
+                {"import_source_file", "TEXT"},
+                {"import_source_row", "INTEGER"}
+            };
+            for (String[] paymentColumn : paymentColumns) {
+                try (ResultSet rs = connection.getMetaData().getColumns(null, null, "payments", paymentColumn[0])) {
+                    if (!rs.next()) {
+                        stmt.execute("ALTER TABLE payments ADD COLUMN " + paymentColumn[0] + " " + paymentColumn[1]);
+                        System.out.println("Migration: Added " + paymentColumn[0] + " column to payments table");
+                    }
+                }
+            }
+
+            String[][] batchColumns = {
+                {"file_count", "INTEGER NOT NULL DEFAULT 1"},
+                {"receipt_academic_year", "TEXT"},
+                {"receipt_term", "TEXT"}
+            };
+            for (String[] batchColumn : batchColumns) {
+                try (ResultSet rs = connection.getMetaData().getColumns(null, null, "import_batches", batchColumn[0])) {
+                    if (!rs.next()) {
+                        stmt.execute("ALTER TABLE import_batches ADD COLUMN " + batchColumn[0] + " " + batchColumn[1]);
+                        System.out.println("Migration: Added " + batchColumn[0] + " column to import_batches table");
+                    }
+                }
+            }
+
+            stmt.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_payments_receipt_scope " +
+                "ON payments(receipt_number, receipt_academic_year, receipt_term) " +
+                "WHERE receipt_academic_year IS NOT NULL " +
+                "AND TRIM(receipt_academic_year) <> '' " +
+                "AND receipt_term IN ('1ST_SEM', '2ND_SEM', 'SUMMER')");
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS import_batch_files (" +
+                "    id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "    batch_code TEXT NOT NULL," +
+                "    file_name TEXT NOT NULL," +
+                "    file_hash TEXT NOT NULL," +
+                "    receipt_academic_year TEXT," +
+                "    receipt_term TEXT," +
+                "    total_rows INTEGER NOT NULL DEFAULT 0," +
+                "    new_records INTEGER NOT NULL DEFAULT 0," +
+                "    duplicate_records INTEGER NOT NULL DEFAULT 0," +
+                "    conflict_records INTEGER NOT NULL DEFAULT 0," +
+                "    error_records INTEGER NOT NULL DEFAULT 0," +
+                "    status TEXT NOT NULL DEFAULT 'PENDING'," +
+                "    created_at TEXT NOT NULL," +
+                "    UNIQUE(batch_code, file_name, file_hash)," +
+                "    FOREIGN KEY (batch_code) REFERENCES import_batches(batch_code)" +
+                ")");
+
+            String[][] batchFileColumns = {
+                {"receipt_academic_year", "TEXT"},
+                {"receipt_term", "TEXT"}
+            };
+            for (String[] batchFileColumn : batchFileColumns) {
+                try (ResultSet rs = connection.getMetaData().getColumns(null, null, "import_batch_files", batchFileColumn[0])) {
+                    if (!rs.next()) {
+                        stmt.execute("ALTER TABLE import_batch_files ADD COLUMN " +
+                            batchFileColumn[0] + " " + batchFileColumn[1]);
+                        System.out.println("Migration: Added " + batchFileColumn[0] +
+                            " column to import_batch_files table");
+                    }
+                }
+            }
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_import_batch_files_batch ON import_batch_files(batch_code)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_import_batch_files_hash ON import_batch_files(file_hash)");
+
             // Create app_settings table if not exists
             stmt.execute("CREATE TABLE IF NOT EXISTS app_settings (" +
                 "    key TEXT PRIMARY KEY," +
@@ -276,11 +359,19 @@ public class DatabaseManager {
                 "    target_student_code TEXT NOT NULL," +
                 "    target_name TEXT NOT NULL," +
                 "    payment_receipts TEXT NOT NULL," +
+                "    payment_ids TEXT," +
                 "    merged_at TEXT NOT NULL," +
                 "    merged_by TEXT," +
                 "    reason TEXT," +
                 "    status TEXT NOT NULL DEFAULT 'ACTIVE'" +
                 ")");
+
+            try (ResultSet rs = connection.getMetaData().getColumns(null, null, "student_merges", "payment_ids")) {
+                if (!rs.next()) {
+                    stmt.execute("ALTER TABLE student_merges ADD COLUMN payment_ids TEXT");
+                    System.out.println("Migration: Added payment_ids column to student_merges table");
+                }
+            }
         }
     }
 
@@ -443,6 +534,65 @@ public class DatabaseManager {
     }
 
     /**
+     * Find student metadata for several normalized names without loading payments.
+     * Intended for bulk matching workflows such as import preview generation.
+     */
+    public List<Student> findStudentSummariesByNormalizedNames(Collection<String> normalizedNames) throws SQLException {
+        return findStudentSummariesByColumn("normalized_name", normalizedNames);
+    }
+
+    /**
+     * Find student metadata for several student codes without loading payments.
+     */
+    public List<Student> findStudentSummariesByCodes(Collection<String> studentCodes) throws SQLException {
+        return findStudentSummariesByColumn("student_code", studentCodes);
+    }
+
+    private List<Student> findStudentSummariesByColumn(String column, Collection<String> values) throws SQLException {
+        if (!"normalized_name".equals(column) && !"student_code".equals(column)) {
+            throw new IllegalArgumentException("Unsupported student lookup column: " + column);
+        }
+        if (values == null || values.isEmpty()) return new ArrayList<>();
+
+        List<String> distinctValues = values.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        List<Student> students = new ArrayList<>();
+
+        for (int start = 0; start < distinctValues.size(); start += SQLITE_BIND_BATCH_SIZE) {
+            int end = Math.min(start + SQLITE_BIND_BATCH_SIZE, distinctValues.size());
+            List<String> batch = distinctValues.subList(start, end);
+            String sql = "SELECT * FROM students WHERE " + column + " IN (" + placeholders(batch.size()) + ") ORDER BY id";
+
+            try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+                for (int i = 0; i < batch.size(); i++) {
+                    stmt.setString(i + 1, batch.get(i));
+                }
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        students.add(mapStudent(rs));
+                    }
+                }
+            }
+
+        }
+        return students;
+    }
+
+    /**
+     * Read the largest generated STU sequence directly in SQLite.
+     */
+    public int getMaxStudentSequence() throws SQLException {
+        String sql = "SELECT COALESCE(MAX(CAST(SUBSTR(student_code, 5) AS INTEGER)), 0) " +
+                     "FROM students WHERE student_code GLOB 'STU-[0-9][0-9][0-9][0-9][0-9][0-9]'";
+        try (Statement stmt = getConnection().createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            return rs.next() ? rs.getInt(1) : 0;
+        }
+    }
+
+    /**
      * Get all students with payments populated.
      */
     public List<Student> getAllStudents() throws SQLException {
@@ -491,17 +641,113 @@ public class DatabaseManager {
                 studentMap.put(s.getStudentCode(), s);
             }
         }
-        String sql = "SELECT * FROM payments WHERE status = 'ACTIVE' ORDER BY receipt_number";
-        try (Statement stmt = getConnection().createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            while (rs.next()) {
-                Payment p = mapPayment(rs);
-                Student s = studentMap.get(p.getStudentId());
-                if (s != null) {
-                    s.addPayment(p);
+        List<String> studentCodes = new ArrayList<>(studentMap.keySet());
+        for (int start = 0; start < studentCodes.size(); start += SQLITE_BIND_BATCH_SIZE) {
+            int end = Math.min(start + SQLITE_BIND_BATCH_SIZE, studentCodes.size());
+            List<String> batch = studentCodes.subList(start, end);
+            String sql = "SELECT * FROM payments WHERE status = 'ACTIVE' AND student_id IN (" +
+                         placeholders(batch.size()) + ") ORDER BY receipt_number";
+
+            try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+                for (int i = 0; i < batch.size(); i++) {
+                    stmt.setString(i + 1, batch.get(i));
+                }
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        Payment p = mapPayment(rs);
+                        Student s = studentMap.get(p.getStudentId());
+                        if (s != null) {
+                            s.addPayment(p);
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * Legacy unscoped bulk lookup. Rejects receipt numbers that occur in more
+     * than one period instead of returning an arbitrary record.
+     */
+    @Deprecated
+    public Map<Integer, Payment> findPaymentsByReceiptNumbers(Collection<Integer> receiptNumbers) throws SQLException {
+        Map<Integer, Payment> payments = new LinkedHashMap<>();
+        if (receiptNumbers == null || receiptNumbers.isEmpty()) return payments;
+
+        List<Integer> distinctReceipts = receiptNumbers.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+
+        for (int start = 0; start < distinctReceipts.size(); start += SQLITE_BIND_BATCH_SIZE) {
+            int end = Math.min(start + SQLITE_BIND_BATCH_SIZE, distinctReceipts.size());
+            List<Integer> batch = distinctReceipts.subList(start, end);
+            String sql = "SELECT * FROM payments WHERE receipt_number IN (" + placeholders(batch.size()) + ") ORDER BY id";
+
+            try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+                for (int i = 0; i < batch.size(); i++) {
+                    stmt.setInt(i + 1, batch.get(i));
+                }
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        Payment payment = mapPayment(rs);
+                        Payment prior = payments.putIfAbsent(payment.getReceiptNumber(), payment);
+                        if (prior != null) {
+                            throw new SQLException("Receipt #" + payment.getReceiptNumber() +
+                                " exists in multiple periods; use a period-scoped lookup");
+                        }
+                    }
+                }
+            }
+        }
+        return payments;
+    }
+
+    /**
+     * Find payments by receipt number within one issuance period. Receipt
+     * numbers may legitimately repeat in a different academic period.
+     */
+    public Map<Integer, Payment> findPaymentsByReceiptNumbers(Collection<Integer> receiptNumbers,
+                                                               String receiptAcademicYear,
+                                                               ChargeAcademicTerm receiptTerm) throws SQLException {
+        ReceiptKey scopeProbe = new ReceiptKey(1, receiptAcademicYear, receiptTerm);
+        if (!scopeProbe.hasDefinedScope()) {
+            throw new IllegalArgumentException("Receipt academic year and a concrete semester are required");
+        }
+
+        Map<Integer, Payment> payments = new LinkedHashMap<>();
+        if (receiptNumbers == null || receiptNumbers.isEmpty()) return payments;
+
+        List<Integer> distinctReceipts = receiptNumbers.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+
+        for (int start = 0; start < distinctReceipts.size(); start += SQLITE_BIND_BATCH_SIZE) {
+            int end = Math.min(start + SQLITE_BIND_BATCH_SIZE, distinctReceipts.size());
+            List<Integer> batch = distinctReceipts.subList(start, end);
+            String sql = "SELECT * FROM payments WHERE receipt_academic_year = ? AND receipt_term = ? " +
+                         "AND receipt_number IN (" + placeholders(batch.size()) + ") ORDER BY id";
+
+            try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+                stmt.setString(1, scopeProbe.academicYear());
+                stmt.setString(2, scopeProbe.term().getCode());
+                for (int i = 0; i < batch.size(); i++) {
+                    stmt.setInt(i + 3, batch.get(i));
+                }
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        Payment payment = mapPayment(rs);
+                        payments.putIfAbsent(payment.getReceiptNumber(), payment);
+                    }
+                }
+            }
+        }
+        return payments;
+    }
+
+    private static String placeholders(int count) {
+        return String.join(",", Collections.nCopies(count, "?"));
     }
 
     private Student mapStudent(ResultSet rs) throws SQLException {
@@ -524,8 +770,9 @@ public class DatabaseManager {
      */
     public int insertPayment(Payment payment) throws SQLException {
         String sql = "INSERT INTO payments (receipt_number, student_id, name, program, intel_fee, tshirt_sizing, " +
-                     "penalties, cit_night, received_by, remarks, remittance_date, charge_academic_term, academic_year, status, created_at, updated_at) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                     "penalties, cit_night, received_by, remarks, remittance_date, charge_academic_term, academic_year, status, " +
+                     "receipt_academic_year, receipt_term, import_batch_code, import_source_file, import_source_row, created_at, updated_at) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (PreparedStatement stmt = getConnection().prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             stmt.setInt(1, payment.getReceiptNumber());
@@ -546,8 +793,17 @@ public class DatabaseManager {
             stmt.setString(12, payment.getChargeAcademicTermCode());
             stmt.setString(13, payment.getAcademicYear());
             stmt.setString(14, payment.getStatus());
-            stmt.setString(15, payment.getCreatedAt().toString());
-            stmt.setString(16, payment.getUpdatedAt().toString());
+            stmt.setString(15, payment.getReceiptAcademicYear());
+            stmt.setString(16, payment.getReceiptTermCode());
+            stmt.setString(17, payment.getImportBatchCode());
+            stmt.setString(18, payment.getImportSourceFile());
+            if (payment.getImportSourceRow() != null) {
+                stmt.setInt(19, payment.getImportSourceRow());
+            } else {
+                stmt.setNull(19, Types.INTEGER);
+            }
+            stmt.setString(20, payment.getCreatedAt().toString());
+            stmt.setString(21, payment.getUpdatedAt().toString());
 
             stmt.executeUpdate();
 
@@ -566,10 +822,13 @@ public class DatabaseManager {
      * Update an existing payment.
      */
     public boolean updatePayment(Payment payment) throws SQLException {
+        if (payment == null || payment.getId() <= 0) {
+            throw new SQLException("A persisted payment ID is required for updates");
+        }
         String sql = "UPDATE payments SET name = ?, program = ?, intel_fee = ?, tshirt_sizing = ?, penalties = ?, " +
                      "cit_night = ?, received_by = ?, remarks = ?, remittance_date = ?, charge_academic_term = ?, academic_year = ?, " +
-                     "status = ?, updated_at = ? " +
-                     "WHERE id = ? OR (receipt_number = ? AND student_id = ?)";
+                     "status = ?, receipt_academic_year = ?, receipt_term = ?, updated_at = ? " +
+                     "WHERE id = ?";
 
         try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
             stmt.setString(1, payment.getName());
@@ -588,10 +847,10 @@ public class DatabaseManager {
             stmt.setString(10, payment.getChargeAcademicTermCode());
             stmt.setString(11, payment.getAcademicYear());
             stmt.setString(12, payment.getStatus());
-            stmt.setString(13, payment.getUpdatedAt().toString());
-            stmt.setInt(14, payment.getId());
-            stmt.setInt(15, payment.getReceiptNumber());
-            stmt.setString(16, payment.getStudentId());
+            stmt.setString(13, payment.getReceiptAcademicYear());
+            stmt.setString(14, payment.getReceiptTermCode());
+            stmt.setString(15, payment.getUpdatedAt().toString());
+            stmt.setInt(16, payment.getId());
 
             return stmt.executeUpdate() > 0;
         }
@@ -615,17 +874,24 @@ public class DatabaseManager {
     }
 
     /**
-     * Find payment by receipt number and student_id.
+     * Find a payment by receipt number and student ID. This legacy lookup
+     * rejects ambiguous results now that receipt numbers can repeat by period.
      */
     public Optional<Payment> findPayment(int receiptNumber, String studentId) throws SQLException {
-        String sql = "SELECT * FROM payments WHERE receipt_number = ? AND student_id = ?";
+        String sql = "SELECT * FROM payments WHERE receipt_number = ? AND student_id = ? ORDER BY id LIMIT 2";
 
         try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
             stmt.setInt(1, receiptNumber);
             stmt.setString(2, studentId);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    return Optional.of(mapPayment(rs));
+                    Payment payment = mapPayment(rs);
+                    if (rs.next()) {
+                        throw new SQLException("Receipt #" + receiptNumber +
+                            " exists in multiple periods for student " + studentId +
+                            "; select a specific payment record");
+                    }
+                    return Optional.of(payment);
                 }
             }
         }
@@ -633,16 +899,22 @@ public class DatabaseManager {
     }
 
     /**
-     * Find payment by receipt number (global, for duplicate detection).
+     * Find a payment by receipt number. This legacy lookup rejects ambiguous
+     * results; period-aware workflows must use a scoped lookup instead.
      */
     public Optional<Payment> findPaymentByReceiptNumber(int receiptNumber) throws SQLException {
-        String sql = "SELECT * FROM payments WHERE receipt_number = ?";
+        String sql = "SELECT * FROM payments WHERE receipt_number = ? ORDER BY id LIMIT 2";
 
         try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
             stmt.setInt(1, receiptNumber);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    return Optional.of(mapPayment(rs));
+                    Payment payment = mapPayment(rs);
+                    if (rs.next()) {
+                        throw new SQLException("Receipt #" + receiptNumber +
+                            " exists in multiple periods; provide the receipt period or payment ID");
+                    }
+                    return Optional.of(payment);
                 }
             }
         }
@@ -716,6 +988,15 @@ public class DatabaseManager {
             p.setAcademicYear(rs.getString("academic_year"));
         } catch (SQLException ignored) {}
 
+        try {
+            p.setReceiptAcademicYear(rs.getString("receipt_academic_year"));
+            p.setReceiptTermCode(rs.getString("receipt_term"));
+            p.setImportBatchCode(rs.getString("import_batch_code"));
+            p.setImportSourceFile(rs.getString("import_source_file"));
+            int sourceRow = rs.getInt("import_source_row");
+            if (!rs.wasNull()) p.setImportSourceRow(sourceRow);
+        } catch (SQLException ignored) {}
+
         // Item-level terms and AY
         try {
             String itTerm = rs.getString("intel_fee_term");
@@ -752,28 +1033,31 @@ public class DatabaseManager {
     // ==================== ImportBatch Operations ====================
 
     public int insertImportBatch(ImportBatch batch) throws SQLException {
-        String sql = "INSERT INTO import_batches (batch_code, file_name, remittance_date, imported_at, imported_by, " +
+        String sql = "INSERT INTO import_batches (batch_code, file_name, file_count, receipt_academic_year, receipt_term, remittance_date, imported_at, imported_by, " +
                      "total_rows, new_records, duplicate_records, conflict_records, error_records, status, created_at, updated_at) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (PreparedStatement stmt = getConnection().prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             stmt.setString(1, batch.getBatchCode());
             stmt.setString(2, batch.getFileName());
+            stmt.setInt(3, batch.getFileCount());
+            stmt.setString(4, batch.getReceiptAcademicYear());
+            stmt.setString(5, batch.getReceiptTerm().getCode());
             if (batch.getRemittanceDate() != null) {
-                stmt.setString(3, batch.getRemittanceDate().toString());
+                stmt.setString(6, batch.getRemittanceDate().toString());
             } else {
-                stmt.setNull(3, Types.VARCHAR);
+                stmt.setNull(6, Types.VARCHAR);
             }
-            stmt.setString(4, batch.getImportedAt().toString());
-            stmt.setString(5, batch.getImportedBy());
-            stmt.setInt(6, batch.getTotalRows());
-            stmt.setInt(7, batch.getNewRecords());
-            stmt.setInt(8, batch.getDuplicateRecords());
-            stmt.setInt(9, batch.getConflictRecords());
-            stmt.setInt(10, batch.getErrorRecords());
-            stmt.setString(11, batch.getStatus());
-            stmt.setString(12, batch.getCreatedAt().toString());
-            stmt.setString(13, batch.getUpdatedAt().toString());
+            stmt.setString(7, batch.getImportedAt().toString());
+            stmt.setString(8, batch.getImportedBy());
+            stmt.setInt(9, batch.getTotalRows());
+            stmt.setInt(10, batch.getNewRecords());
+            stmt.setInt(11, batch.getDuplicateRecords());
+            stmt.setInt(12, batch.getConflictRecords());
+            stmt.setInt(13, batch.getErrorRecords());
+            stmt.setString(14, batch.getStatus());
+            stmt.setString(15, batch.getCreatedAt().toString());
+            stmt.setString(16, batch.getUpdatedAt().toString());
 
             stmt.executeUpdate();
 
@@ -787,27 +1071,30 @@ public class DatabaseManager {
     }
 
     public boolean updateImportBatch(ImportBatch batch) throws SQLException {
-        String sql = "UPDATE import_batches SET file_name = ?, remittance_date = ?, imported_at = ?, imported_by = ?, " +
+        String sql = "UPDATE import_batches SET file_name = ?, file_count = ?, receipt_academic_year = ?, receipt_term = ?, remittance_date = ?, imported_at = ?, imported_by = ?, " +
                      "total_rows = ?, new_records = ?, duplicate_records = ?, conflict_records = ?, error_records = ?, " +
                      "status = ?, updated_at = ? WHERE batch_code = ?";
 
         try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
             stmt.setString(1, batch.getFileName());
+            stmt.setInt(2, batch.getFileCount());
+            stmt.setString(3, batch.getReceiptAcademicYear());
+            stmt.setString(4, batch.getReceiptTerm().getCode());
             if (batch.getRemittanceDate() != null) {
-                stmt.setString(2, batch.getRemittanceDate().toString());
+                stmt.setString(5, batch.getRemittanceDate().toString());
             } else {
-                stmt.setNull(2, Types.VARCHAR);
+                stmt.setNull(5, Types.VARCHAR);
             }
-            stmt.setString(3, batch.getImportedAt().toString());
-            stmt.setString(4, batch.getImportedBy());
-            stmt.setInt(5, batch.getTotalRows());
-            stmt.setInt(6, batch.getNewRecords());
-            stmt.setInt(7, batch.getDuplicateRecords());
-            stmt.setInt(8, batch.getConflictRecords());
-            stmt.setInt(9, batch.getErrorRecords());
-            stmt.setString(10, batch.getStatus());
-            stmt.setString(11, batch.getUpdatedAt().toString());
-            stmt.setString(12, batch.getBatchCode());
+            stmt.setString(6, batch.getImportedAt().toString());
+            stmt.setString(7, batch.getImportedBy());
+            stmt.setInt(8, batch.getTotalRows());
+            stmt.setInt(9, batch.getNewRecords());
+            stmt.setInt(10, batch.getDuplicateRecords());
+            stmt.setInt(11, batch.getConflictRecords());
+            stmt.setInt(12, batch.getErrorRecords());
+            stmt.setString(13, batch.getStatus());
+            stmt.setString(14, batch.getUpdatedAt().toString());
+            stmt.setString(15, batch.getBatchCode());
 
             return stmt.executeUpdate() > 0;
         }
@@ -840,11 +1127,30 @@ public class DatabaseManager {
         return batches;
     }
 
+    /**
+     * Return the largest numeric suffix used by an import batch for a year.
+     */
+    public int getMaxImportBatchSequence(int year) throws SQLException {
+        String prefix = "IMP-" + year + "-";
+        String sql = "SELECT COALESCE(MAX(CAST(SUBSTR(batch_code, ?) AS INTEGER)), 0) " +
+                     "FROM import_batches WHERE batch_code GLOB ?";
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+            stmt.setInt(1, prefix.length() + 1);
+            stmt.setString(2, prefix + "[0-9]*");
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+    }
+
     private ImportBatch mapImportBatch(ResultSet rs) throws SQLException {
         ImportBatch b = new ImportBatch();
         b.setId(rs.getInt("id"));
         b.setBatchCode(rs.getString("batch_code"));
         b.setFileName(rs.getString("file_name"));
+        b.setFileCount(rs.getInt("file_count"));
+        b.setReceiptAcademicYear(rs.getString("receipt_academic_year"));
+        b.setReceiptTerm(ChargeAcademicTerm.fromCode(rs.getString("receipt_term")));
         String remDate = rs.getString("remittance_date");
         if (remDate != null && !remDate.isEmpty()) {
             b.setRemittanceDate(LocalDate.parse(remDate));
@@ -860,6 +1166,62 @@ public class DatabaseManager {
         b.setCreatedAt(LocalDateTime.parse(rs.getString("created_at")));
         b.setUpdatedAt(LocalDateTime.parse(rs.getString("updated_at")));
         return b;
+    }
+
+    public int insertImportBatchFile(ImportBatchFile file) throws SQLException {
+        String sql = "INSERT INTO import_batch_files (batch_code, file_name, file_hash, receipt_academic_year, receipt_term, " +
+                     "total_rows, new_records, duplicate_records, conflict_records, error_records, status, created_at) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            stmt.setString(1, file.getBatchCode());
+            stmt.setString(2, file.getFileName());
+            stmt.setString(3, file.getFileHash());
+            stmt.setString(4, file.getReceiptAcademicYear());
+            stmt.setString(5, file.getReceiptTerm().getCode());
+            stmt.setInt(6, file.getTotalRows());
+            stmt.setInt(7, file.getNewRecords());
+            stmt.setInt(8, file.getDuplicateRecords());
+            stmt.setInt(9, file.getConflictRecords());
+            stmt.setInt(10, file.getErrorRecords());
+            stmt.setString(11, file.getStatus());
+            stmt.setString(12, file.getCreatedAt().toString());
+            stmt.executeUpdate();
+            try (ResultSet rs = stmt.getGeneratedKeys()) {
+                if (rs.next()) {
+                    file.setId(rs.getInt(1));
+                    return file.getId();
+                }
+            }
+        }
+        return -1;
+    }
+
+    public List<ImportBatchFile> getImportBatchFiles(String batchCode) throws SQLException {
+        String sql = "SELECT * FROM import_batch_files WHERE batch_code = ? ORDER BY id";
+        List<ImportBatchFile> files = new ArrayList<>();
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+            stmt.setString(1, batchCode);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    ImportBatchFile file = new ImportBatchFile();
+                    file.setId(rs.getInt("id"));
+                    file.setBatchCode(rs.getString("batch_code"));
+                    file.setFileName(rs.getString("file_name"));
+                    file.setFileHash(rs.getString("file_hash"));
+                    file.setReceiptAcademicYear(rs.getString("receipt_academic_year"));
+                    file.setReceiptTerm(ChargeAcademicTerm.fromCode(rs.getString("receipt_term")));
+                    file.setTotalRows(rs.getInt("total_rows"));
+                    file.setNewRecords(rs.getInt("new_records"));
+                    file.setDuplicateRecords(rs.getInt("duplicate_records"));
+                    file.setConflictRecords(rs.getInt("conflict_records"));
+                    file.setErrorRecords(rs.getInt("error_records"));
+                    file.setStatus(rs.getString("status"));
+                    file.setCreatedAt(LocalDateTime.parse(rs.getString("created_at")));
+                    files.add(file);
+                }
+            }
+        }
+        return files;
     }
 
     // ==================== Audit Log Operations ====================
@@ -1009,14 +1371,23 @@ public class DatabaseManager {
      * Set payment status to VOID with an audit trail entry.
      */
     public boolean voidPayment(int receiptNumber, String reason, String user) throws SQLException {
-        String sql = "UPDATE payments SET status = 'VOID', updated_at = ? WHERE receipt_number = ?";
+        int paymentId = findUniquePaymentIdByReceipt(receiptNumber);
+        return paymentId >= 0 && voidPaymentById(paymentId, reason, user);
+    }
+
+    public boolean voidPaymentById(int paymentId, String reason, String user) throws SQLException {
+        Optional<Payment> existing = findPaymentById(paymentId);
+        if (existing.isEmpty()) return false;
+        String sql = "UPDATE payments SET status = 'VOID', updated_at = ? WHERE id = ?";
         try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
             stmt.setString(1, LocalDateTime.now().toString());
-            stmt.setInt(2, receiptNumber);
+            stmt.setInt(2, paymentId);
             int updated = stmt.executeUpdate();
             if (updated > 0) {
-                logAudit("VOID", "PAYMENT", String.valueOf(receiptNumber),
-                    "ACTIVE", "VOID", reason, user != null ? user : "user");
+                Payment payment = existing.get();
+                logAudit("VOID", "PAYMENT", String.valueOf(payment.getReceiptNumber()),
+                    "ACTIVE", "VOID", reason,
+                    user != null ? user : "user");
                 return true;
             }
         }
@@ -1027,38 +1398,100 @@ public class DatabaseManager {
      * Reactivate a VOID payment back to ACTIVE with an audit trail entry.
      */
     public boolean unvoidPayment(int receiptNumber, String reason, String user) throws SQLException {
-        String sql = "UPDATE payments SET status = 'ACTIVE', updated_at = ? WHERE receipt_number = ?";
+        int paymentId = findUniquePaymentIdByReceipt(receiptNumber);
+        return paymentId >= 0 && unvoidPaymentById(paymentId, reason, user);
+    }
+
+    public boolean unvoidPaymentById(int paymentId, String reason, String user) throws SQLException {
+        Optional<Payment> existing = findPaymentById(paymentId);
+        if (existing.isEmpty()) return false;
+        String sql = "UPDATE payments SET status = 'ACTIVE', updated_at = ? WHERE id = ?";
         try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
             stmt.setString(1, LocalDateTime.now().toString());
-            stmt.setInt(2, receiptNumber);
+            stmt.setInt(2, paymentId);
             int updated = stmt.executeUpdate();
             if (updated > 0) {
-                logAudit("UPDATE", "PAYMENT", String.valueOf(receiptNumber),
-                    "VOID", "ACTIVE", reason, user != null ? user : "user");
+                Payment payment = existing.get();
+                logAudit("UPDATE", "PAYMENT", String.valueOf(payment.getReceiptNumber()),
+                    "VOID", "ACTIVE", reason,
+                    user != null ? user : "user");
                 return true;
             }
         }
         return false;
     }
 
+    private int findUniquePaymentIdByReceipt(int receiptNumber) throws SQLException {
+        String sql = "SELECT id FROM payments WHERE receipt_number = ? ORDER BY id";
+        Integer paymentId = null;
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+            stmt.setInt(1, receiptNumber);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    if (paymentId != null) {
+                        throw new SQLException("Receipt #" + receiptNumber +
+                            " exists in multiple periods; select a specific payment record");
+                    }
+                    paymentId = rs.getInt(1);
+                }
+            }
+        }
+        return paymentId != null ? paymentId : -1;
+    }
+
     /**
      * Update the charge academic term for a payment with an audit trail entry (by receipt number).
      */
     public boolean updatePaymentChargeTerm(int receiptNumber, com.payment.ChargeAcademicTerm newTerm, String reason, String user) throws SQLException {
-        Optional<Payment> existing = findPaymentByReceiptNumber(receiptNumber);
+        int paymentId = findUniquePaymentIdByReceipt(receiptNumber);
+        return paymentId >= 0 && updatePaymentChargeTermById(paymentId, newTerm, reason, user);
+    }
+
+    public boolean updatePaymentChargeTermById(int paymentId, ChargeAcademicTerm newTerm,
+                                                String reason, String user) throws SQLException {
+        Optional<Payment> existing = findPaymentById(paymentId);
         if (existing.isEmpty()) return false;
         String oldTerm = existing.get().getChargeAcademicTermCode();
-        String termCode = newTerm != null ? newTerm.getCode() : com.payment.ChargeAcademicTerm.DB_UNASSIGNED;
+        String termCode = newTerm != null ? newTerm.getCode() : ChargeAcademicTerm.DB_UNASSIGNED;
 
-        String sql = "UPDATE payments SET charge_academic_term = ?, updated_at = ? WHERE receipt_number = ?";
+        String sql = "UPDATE payments SET charge_academic_term = ?, updated_at = ? WHERE id = ?";
         try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
             stmt.setString(1, termCode);
             stmt.setString(2, LocalDateTime.now().toString());
-            stmt.setInt(3, receiptNumber);
+            stmt.setInt(3, paymentId);
             int updated = stmt.executeUpdate();
             if (updated > 0) {
-                logAudit("UPDATE", "PAYMENT", String.valueOf(receiptNumber),
+                logAudit("UPDATE", "PAYMENT", "id:" + paymentId + " (rcpt:" + existing.get().getReceiptNumber() + ")",
                     "term:" + oldTerm, "term:" + termCode, reason != null ? reason : "Assigned academic term", user != null ? user : "user");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean updatePaymentReceiptScope(int paymentId, String academicYear,
+                                              ChargeAcademicTerm receiptTerm,
+                                              String reason, String user) throws SQLException {
+        ReceiptKey newKey = new ReceiptKey(1, academicYear, receiptTerm);
+        if (receiptTerm == ChargeAcademicTerm.CURRENT || receiptTerm == ChargeAcademicTerm.PREVIOUS) {
+            throw new IllegalArgumentException("Receipt semester must be 1st Semester, 2nd Semester, or Summer");
+        }
+        Optional<Payment> existing = findPaymentById(paymentId);
+        if (existing.isEmpty()) return false;
+
+        Payment oldPayment = existing.get();
+        String sql = "UPDATE payments SET receipt_academic_year = ?, receipt_term = ?, updated_at = ? WHERE id = ?";
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+            stmt.setString(1, newKey.academicYear());
+            stmt.setString(2, newKey.term().getCode());
+            stmt.setString(3, LocalDateTime.now().toString());
+            stmt.setInt(4, paymentId);
+            int updated = stmt.executeUpdate();
+            if (updated > 0) {
+                logAudit("UPDATE", "PAYMENT", "id:" + paymentId + " (rcpt:" + oldPayment.getReceiptNumber() + ")",
+                    "receipt-scope:" + oldPayment.getReceiptKey().displayScope(),
+                    "receipt-scope:" + newKey.displayScope(),
+                    reason != null ? reason : "Assigned receipt period", user != null ? user : "user");
                 return true;
             }
         }
@@ -1275,6 +1708,7 @@ public class DatabaseManager {
 
         List<Payment> sourcePayments = getPaymentsByStudent(sourceCode);
         List<Integer> receipts = sourcePayments.stream().map(Payment::getReceiptNumber).collect(Collectors.toList());
+        List<Integer> paymentIds = sourcePayments.stream().map(Payment::getId).collect(Collectors.toList());
 
         String mergeCode = "MRG-" + System.currentTimeMillis() + "-" + (int)(Math.random() * 900 + 100);
         LocalDateTime now = LocalDateTime.now();
@@ -1306,8 +1740,8 @@ public class DatabaseManager {
             String insertMergeSql = "INSERT INTO student_merges (" +
                 "merge_code, source_student_code, source_name, source_normalized_name, " +
                 "source_program, source_year_level, source_created_at, source_updated_at, " +
-                "target_student_code, target_name, payment_receipts, merged_at, merged_by, reason, status) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')";
+                "target_student_code, target_name, payment_receipts, payment_ids, merged_at, merged_by, reason, status) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')";
             try (PreparedStatement stmt = conn.prepareStatement(insertMergeSql)) {
                 stmt.setString(1, mergeCode);
                 stmt.setString(2, source.getStudentCode());
@@ -1321,9 +1755,10 @@ public class DatabaseManager {
                 stmt.setString(9, target.getStudentCode());
                 stmt.setString(10, target.getName());
                 stmt.setString(11, receipts.stream().map(String::valueOf).collect(Collectors.joining(",")));
-                stmt.setString(12, now.toString());
-                stmt.setString(13, user != null ? user : "user");
-                stmt.setString(14, reason != null ? reason : "Merged typo/duplicate student");
+                stmt.setString(12, paymentIds.stream().map(String::valueOf).collect(Collectors.joining(",")));
+                stmt.setString(13, now.toString());
+                stmt.setString(14, user != null ? user : "user");
+                stmt.setString(15, reason != null ? reason : "Merged typo/duplicate student");
                 stmt.executeUpdate();
             }
 
@@ -1348,6 +1783,7 @@ public class DatabaseManager {
             record.setTargetStudentCode(target.getStudentCode());
             record.setTargetName(target.getName());
             record.setReceiptNumbersList(receipts);
+            record.setPaymentIdsList(paymentIds);
             record.setMergedAt(now);
             record.setMergedBy(user);
             record.setReason(reason);
@@ -1405,18 +1841,31 @@ public class DatabaseManager {
             }
 
             // 2. Revert transferred payments back to source student
+            List<Integer> paymentIds = record.getPaymentIdsList();
             List<Integer> receipts = record.getReceiptNumbersList();
-            if (!receipts.isEmpty()) {
-                String inClause = receipts.stream().map(r -> "?").collect(Collectors.joining(","));
-                String revertPaymentsSql = "UPDATE payments SET student_id = ?, name = ?, program = ?, updated_at = ? WHERE receipt_number IN (" + inClause + ")";
+            List<Integer> identifiers = !paymentIds.isEmpty() ? paymentIds : receipts;
+            if (!identifiers.isEmpty()) {
+                String inClause = identifiers.stream().map(r -> "?").collect(Collectors.joining(","));
+                boolean usesStableIds = !paymentIds.isEmpty();
+                String identityColumn = usesStableIds ? "id" : "receipt_number";
+                String revertPaymentsSql = "UPDATE payments SET student_id = ?, name = ?, program = ?, updated_at = ? WHERE " +
+                    identityColumn + " IN (" + inClause + ") AND student_id = ?" +
+                    (usesStableIds ? "" : " AND updated_at = ?");
                 try (PreparedStatement stmt = conn.prepareStatement(revertPaymentsSql)) {
                     stmt.setString(1, record.getSourceStudentCode());
                     stmt.setString(2, record.getSourceName());
                     stmt.setString(3, record.getSourceProgram());
                     stmt.setString(4, now.toString());
                     int idx = 5;
-                    for (Integer rcpt : receipts) {
-                        stmt.setInt(idx++, rcpt);
+                    for (Integer identifier : identifiers) {
+                        stmt.setInt(idx++, identifier);
+                    }
+                    stmt.setString(idx++, record.getTargetStudentCode());
+                    if (!usesStableIds) {
+                        // Legacy merge rows did not retain payment IDs. The merge
+                        // timestamp distinguishes transferred rows from a target
+                        // student's own reused receipt number.
+                        stmt.setString(idx, record.getMergedAt().toString());
                     }
                     stmt.executeUpdate();
                 }
@@ -1434,7 +1883,7 @@ public class DatabaseManager {
             // Log in audit trail
             logAudit("UNDO_MERGE", "STUDENT", record.getSourceStudentCode(),
                 "Merged into " + record.getTargetStudentCode(),
-                "Restored " + record.getSourceStudentCode() + " (" + record.getSourceName() + ") with " + receipts.size() + " payments",
+                "Restored " + record.getSourceStudentCode() + " (" + record.getSourceName() + ") with " + identifiers.size() + " payments",
                 "Reverted student merge " + mergeCode,
                 user != null ? user : "user");
 
@@ -1494,6 +1943,9 @@ public class DatabaseManager {
         r.setTargetStudentCode(rs.getString("target_student_code"));
         r.setTargetName(rs.getString("target_name"));
         r.setPaymentReceipts(rs.getString("payment_receipts"));
+        try {
+            r.setPaymentIds(rs.getString("payment_ids"));
+        } catch (SQLException ignored) {}
         r.setMergedAt(LocalDateTime.parse(rs.getString("merged_at")));
         r.setMergedBy(rs.getString("merged_by"));
         r.setReason(rs.getString("reason"));

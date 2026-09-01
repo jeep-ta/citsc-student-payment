@@ -2,7 +2,11 @@ package com.payment;
 
 import com.payment.database.DatabaseManager;
 
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -32,51 +36,139 @@ public class ImportService {
      * @throws IOException If file cannot be read
      */
     public ImportPreviewResult generatePreview(String filePath, LocalDate remittanceDate, String importedBy) throws IOException {
-        // 1. Parse Excel
-        List<Student> parsedStudents = ExcelImporter.importFromExcel(filePath, remittanceDate);
+        ChargeAcademicTerm receiptTerm = concreteReceiptTerm(db.getCurrentAcademicTerm());
+        return generatePreview(
+            List.of(filePath),
+            remittanceDate,
+            importedBy,
+            db.getCurrentAcademicYear(),
+            receiptTerm
+        );
+    }
 
-        // 2. Convert to flat list of preview items
+    /**
+     * Generate one combined preview for several spreadsheets. All files are
+     * committed as one transaction and share the same receipt issuance period.
+     */
+    public ImportPreviewResult generatePreview(List<String> filePaths,
+                                               LocalDate remittanceDate,
+                                               String importedBy,
+                                               String receiptAcademicYear,
+                                               ChargeAcademicTerm receiptTerm) throws IOException {
+        if (filePaths == null || filePaths.isEmpty()) {
+            throw new IllegalArgumentException("Select at least one spreadsheet");
+        }
+        List<ImportFileSelection> selections = filePaths.stream()
+            .map(path -> new ImportFileSelection(path, receiptAcademicYear, receiptTerm))
+            .toList();
+        return generateBatchPreview(selections, remittanceDate, importedBy);
+    }
+
+    /**
+     * Generate one combined preview where each spreadsheet can carry its own
+     * receipt issuance period. This supports historical batches containing
+     * reused receipt numbers from different semesters.
+     */
+    public ImportPreviewResult generateBatchPreview(List<ImportFileSelection> selections,
+                                                    LocalDate remittanceDate,
+                                                    String importedBy) throws IOException {
+        if (selections == null || selections.isEmpty()) {
+            throw new IllegalArgumentException("Select at least one spreadsheet");
+        }
+
+        for (ImportFileSelection selection : selections) {
+            if (selection == null || selection.filePath() == null || selection.filePath().isBlank()) {
+                throw new IllegalArgumentException("Every spreadsheet must have a valid file path");
+            }
+            if (!selection.getReceiptKey(1).hasDefinedScope()) {
+                throw new IllegalArgumentException("Receipt academic year and semester are required for " +
+                    new File(selection.filePath()).getName());
+            }
+        }
+
         List<ImportPreviewItem> previewItems = new ArrayList<>();
-        int rowNumber = 1; // Excel row (1-based, after header)
+        List<ImportBatchFile> batchFiles = new ArrayList<>();
 
         ChargeAcademicTerm activeTerm = db.getCurrentAcademicTerm();
         boolean autoAssign = db.isAutoAssignCurrentTerm();
 
-        for (Student parsedStudent : parsedStudents) {
-            for (Payment payment : parsedStudent.getPayments()) {
-                ImportPreviewItem item = new ImportPreviewItem(
-                    rowNumber++,
-                    payment.getReceiptNumber(),
-                    parsedStudent.getName(),
-                    parsedStudent.getProgram(),
-                    payment.getIntelFee(),
-                    payment.getTshirtSizing(),
-                    payment.getPenalties(),
-                    payment.getCitNight(),
-                    payment.getReceivedBy(),
-                    payment.getRemarks(),
-                    payment.getRemittanceDate()
-                );
-                // Carry academic term or auto-assign active term if configured
-                if (autoAssign && (payment.getChargeAcademicTerm() == null || payment.getChargeAcademicTerm() == ChargeAcademicTerm.UNASSIGNED)) {
-                    item.setChargeAcademicTerm(activeTerm != null ? activeTerm : ChargeAcademicTerm.FIRST_SEM);
-                } else {
-                    item.setChargeAcademicTerm(payment.getChargeAcademicTerm());
+        for (ImportFileSelection selection : selections) {
+            String filePath = selection.filePath();
+            ReceiptKey fileScope = selection.getReceiptKey(1);
+            File sourceFile = new File(filePath);
+            ImportBatchFile batchFile = new ImportBatchFile(sourceFile.getName(), "UNAVAILABLE");
+            batchFile.setReceiptAcademicYear(fileScope.academicYear());
+            batchFile.setReceiptTerm(fileScope.term());
+            batchFiles.add(batchFile);
+            try {
+                batchFile.setFileHash(sha256(sourceFile));
+
+                List<Student> parsedStudents = ExcelImporter.importFromExcel(filePath, remittanceDate);
+                for (Student parsedStudent : parsedStudents) {
+                    for (Payment payment : parsedStudent.getPayments()) {
+                        int sourceRow = payment.getImportSourceRow() != null
+                            ? payment.getImportSourceRow() : 0;
+                        ImportPreviewItem item = new ImportPreviewItem(
+                            sourceRow,
+                            payment.getReceiptNumber(),
+                            parsedStudent.getName(),
+                            payment.getProgram(),
+                            payment.getIntelFee(),
+                            payment.getTshirtSizing(),
+                            payment.getPenalties(),
+                            payment.getCitNight(),
+                            payment.getReceivedBy(),
+                            payment.getRemarks(),
+                            payment.getRemittanceDate()
+                        );
+                        item.setSourceFileName(sourceFile.getName());
+                        item.setReceiptAcademicYear(fileScope.academicYear());
+                        item.setReceiptTerm(fileScope.term());
+
+                        if (autoAssign && (payment.getChargeAcademicTerm() == null
+                                || payment.getChargeAcademicTerm() == ChargeAcademicTerm.UNASSIGNED)) {
+                            item.setChargeAcademicTerm(activeTerm != null
+                                ? activeTerm : ChargeAcademicTerm.FIRST_SEM);
+                        } else {
+                            item.setChargeAcademicTerm(payment.getChargeAcademicTerm());
+                        }
+                        previewItems.add(item);
+                    }
                 }
-                previewItems.add(item);
+            } catch (Exception e) {
+                ImportPreviewItem errorItem = new ImportPreviewItem();
+                errorItem.setSourceFileName(sourceFile.getName());
+                errorItem.setReceiptAcademicYear(fileScope.academicYear());
+                errorItem.setReceiptTerm(fileScope.term());
+                errorItem.setStatus(ImportPreviewItem.STATUS_ERROR);
+                errorItem.setErrorMessage("Could not read spreadsheet: " + e.getMessage());
+                previewItems.add(errorItem);
             }
         }
 
-        // 3. Validate and match each item
-        validateAndMatch(previewItems);
+        validateAndMatch(previewItems, autoAssign);
 
-        // 4. Create batch record (not committed yet)
+        String displayName = batchFiles.size() == 1
+            ? batchFiles.get(0).getFileName()
+            : batchFiles.size() + " spreadsheets";
         ImportBatch batch = new ImportBatch(
-            new java.io.File(filePath).getName(),
+            displayName,
             remittanceDate,
             importedBy
         );
         batch.setBatchCode(generateBatchCode());
+        batch.setFileCount(batchFiles.size());
+        Set<ReceiptKey> receiptPeriods = selections.stream()
+            .map(selection -> selection.getReceiptKey(1))
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (receiptPeriods.size() == 1) {
+            ReceiptKey batchScope = receiptPeriods.iterator().next();
+            batch.setReceiptAcademicYear(batchScope.academicYear());
+            batch.setReceiptTerm(batchScope.term());
+        } else {
+            batch.setReceiptAcademicYear(null);
+            batch.setReceiptTerm(ChargeAcademicTerm.UNASSIGNED);
+        }
         batch.setImportedAt(LocalDateTime.now());
         batch.setTotalRows(previewItems.size());
         batch.setNewRecords((int) previewItems.stream().filter(ImportPreviewItem::isNew).count());
@@ -85,14 +177,34 @@ public class ImportService {
         batch.setErrorRecords((int) previewItems.stream().filter(ImportPreviewItem::isError).count());
         batch.setStatus(ImportBatch.STATUS_PENDING);
 
-        return new ImportPreviewResult(previewItems, batch);
+        updateFileSummaries(previewItems, batchFiles);
+        return new ImportPreviewResult(previewItems, batch, batchFiles);
+    }
+
+    private static ChargeAcademicTerm concreteReceiptTerm(ChargeAcademicTerm term) {
+        return ReceiptKey.isConcreteTerm(term) ? term : ChargeAcademicTerm.FIRST_SEM;
+    }
+
+    private static String sha256(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = Files.newInputStream(file.toPath())) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) digest.update(buffer, 0, read);
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     /**
      * Validate and match each preview item against existing database.
      */
-    private void validateAndMatch(List<ImportPreviewItem> items) {
+    private void validateAndMatch(List<ImportPreviewItem> items, boolean autoAssign) {
+        List<ImportPreviewItem> validItems = new ArrayList<>();
         for (ImportPreviewItem item : items) {
+            if (item.isError()) continue;
+
             // Validate receipt number
             if (item.getReceiptNumber() <= 0) {
                 item.setStatus(ImportPreviewItem.STATUS_ERROR);
@@ -107,64 +219,174 @@ public class ImportService {
                 continue;
             }
 
-            try {
-                // Check for existing payment with same receipt number (global)
-                Optional<Payment> existingPayment = db.findPaymentByReceiptNumber(item.getReceiptNumber());
+            if (!item.getReceiptKey().hasDefinedScope()) {
+                item.setStatus(ImportPreviewItem.STATUS_ERROR);
+                item.setErrorMessage("Receipt academic year and semester are required");
+                continue;
+            }
 
-                if (existingPayment.isPresent()) {
-                    Payment existing = existingPayment.get();
-                    // Check if exact duplicate
-                    if (isExactDuplicate(item, existing)) {
-                        item.setStatus(ImportPreviewItem.STATUS_DUPLICATE);
-                        item.setMatchedStudentCode(existing.getStudentId());
-                        // Find student name
-                        db.findStudentByCode(existing.getStudentId())
-                            .ifPresent(s -> item.setMatchedStudentName(s.getName()));
-                    } else {
-                        // Conflict - same receipt, different data
-                        item.setStatus(ImportPreviewItem.STATUS_CONFLICT);
-                        item.setConflictingPayment(existing);
-                        item.setMatchedStudentCode(existing.getStudentId());
-                        db.findStudentByCode(existing.getStudentId())
-                            .ifPresent(s -> item.setMatchedStudentName(s.getName()));
-                    }
-                    continue;
-                }
+            validItems.add(item);
+        }
 
-                // No existing payment with this receipt - match by student name
-                String normalizedName = NameNormalizer.normalize(item.getStudentName());
-                List<Student> matches = db.findAllStudentsByNormalizedName(normalizedName);
+        if (validItems.isEmpty()) return;
 
-                if (matches.isEmpty()) {
-                    // New student
-                    item.setStatus(ImportPreviewItem.STATUS_NEW);
-                    // Propose student code (will be assigned on commit)
-                    item.setProposedStudentCode(generateProposedStudentCode());
-                } else if (matches.size() == 1) {
-                    // Exact match
-                    Student matched = matches.get(0);
-                    item.setStatus(ImportPreviewItem.STATUS_NEW); // New payment for existing student
-                    item.setMatchedStudentCode(matched.getStudentCode());
-                    item.setMatchedStudentName(matched.getName());
-                } else {
-                    // Ambiguous - multiple students with same normalized name
-                    item.setStatus(ImportPreviewItem.STATUS_AMBIGUOUS);
-                    item.setAmbiguousMatches(matches);
-                }
-
-            } catch (Exception e) {
+        ImportLookupSnapshot snapshot;
+        try {
+            snapshot = loadLookupSnapshot(validItems, autoAssign);
+        } catch (Exception e) {
+            for (ImportPreviewItem item : validItems) {
                 item.setStatus(ImportPreviewItem.STATUS_ERROR);
                 item.setErrorMessage("Database error: " + e.getMessage());
             }
+            return;
+        }
+
+        Map<String, String> proposedCodes = new HashMap<>();
+        Map<ReceiptKey, ImportPreviewItem> firstItemsByReceipt = new LinkedHashMap<>();
+        int nextStudentSequence = snapshot.maxStudentSequence();
+
+        for (ImportPreviewItem item : validItems) {
+            Payment existing = snapshot.paymentsByReceipt().get(item.getReceiptKey());
+
+            if (existing != null) {
+                if (isExactDuplicate(item, existing, snapshot.autoAssign(), snapshot.academicYear())) {
+                    item.setStatus(ImportPreviewItem.STATUS_DUPLICATE);
+                } else {
+                    item.setStatus(ImportPreviewItem.STATUS_CONFLICT);
+                    item.setConflictingPayment(existing);
+                }
+
+                item.setMatchedStudentCode(existing.getStudentId());
+                Student matchedStudent = snapshot.studentsByCode().get(existing.getStudentId());
+                item.setMatchedStudentName(matchedStudent != null ? matchedStudent.getName() : existing.getName());
+                continue;
+            }
+
+            ImportPreviewItem firstItem = firstItemsByReceipt.get(item.getReceiptKey());
+            if (firstItem != null) {
+                Payment firstPayment = paymentFromItem(firstItem);
+                Payment currentPayment = paymentFromItem(item);
+                if (snapshot.autoAssign()) {
+                    firstPayment.setAcademicYear(snapshot.academicYear());
+                    currentPayment.setAcademicYear(snapshot.academicYear());
+                }
+                if (currentPayment.isExactDuplicateOf(firstPayment)) {
+                    item.setStatus(ImportPreviewItem.STATUS_DUPLICATE);
+                } else {
+                    item.setStatus(ImportPreviewItem.STATUS_CONFLICT);
+                    item.setConflictingPayment(firstPayment);
+                }
+                item.setMatchedStudentCode(firstItem.getMatchedStudentCode());
+                item.setMatchedStudentName(firstItem.getMatchedStudentName());
+                continue;
+            }
+
+            String normalizedName = NameNormalizer.normalize(item.getStudentName());
+            List<Student> matches = snapshot.studentsByNormalizedName()
+                .getOrDefault(normalizedName, List.of());
+
+            if (matches.isEmpty()) {
+                item.setStatus(ImportPreviewItem.STATUS_NEW);
+                String proposedCode = proposedCodes.get(normalizedName);
+                if (proposedCode == null) {
+                    proposedCode = StudentCodeGenerator.generate(++nextStudentSequence);
+                    proposedCodes.put(normalizedName, proposedCode);
+                }
+                item.setProposedStudentCode(proposedCode);
+            } else if (matches.size() == 1) {
+                Student matched = matches.get(0);
+                item.setStatus(ImportPreviewItem.STATUS_NEW);
+                item.setMatchedStudentCode(matched.getStudentCode());
+                item.setMatchedStudentName(matched.getName());
+            } else {
+                item.setStatus(ImportPreviewItem.STATUS_AMBIGUOUS);
+                item.setAmbiguousMatches(matches);
+            }
+            firstItemsByReceipt.put(item.getReceiptKey(), item);
         }
     }
+
+    private ImportLookupSnapshot loadLookupSnapshot(List<ImportPreviewItem> items, boolean autoAssign) throws Exception {
+        Set<String> normalizedNames = new LinkedHashSet<>();
+
+        for (ImportPreviewItem item : items) {
+            normalizedNames.add(NameNormalizer.normalize(item.getStudentName()));
+        }
+
+        Map<ReceiptKey, List<ImportPreviewItem>> itemsByPeriod = items.stream()
+            .collect(java.util.stream.Collectors.groupingBy(
+                item -> new ReceiptKey(1, item.getReceiptAcademicYear(), item.getReceiptTerm()),
+                LinkedHashMap::new,
+                java.util.stream.Collectors.toList()
+            ));
+
+        Map<ReceiptKey, Payment> paymentsByReceipt = new LinkedHashMap<>();
+        for (Map.Entry<ReceiptKey, List<ImportPreviewItem>> periodEntry : itemsByPeriod.entrySet()) {
+            ReceiptKey period = periodEntry.getKey();
+            Set<Integer> receiptNumbers = periodEntry.getValue().stream()
+                .map(ImportPreviewItem::getReceiptNumber)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            for (Payment payment : db.findPaymentsByReceiptNumbers(
+                    receiptNumbers, period.academicYear(), period.term()).values()) {
+                paymentsByReceipt.put(payment.getReceiptKey(), payment);
+            }
+        }
+        List<Student> studentsByName = db.findStudentSummariesByNormalizedNames(normalizedNames);
+
+        Map<String, List<Student>> studentsByNormalizedName = new HashMap<>();
+        Map<String, Student> studentsByCode = new HashMap<>();
+        for (Student student : studentsByName) {
+            studentsByNormalizedName
+                .computeIfAbsent(student.getNormalizedName(), ignored -> new ArrayList<>())
+                .add(student);
+            studentsByCode.put(student.getStudentCode(), student);
+        }
+
+        Set<String> matchedStudentCodes = paymentsByReceipt.values().stream()
+            .map(Payment::getStudentId)
+            .filter(Objects::nonNull)
+            .filter(code -> !studentsByCode.containsKey(code))
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+
+        for (Student student : db.findStudentSummariesByCodes(matchedStudentCodes)) {
+            studentsByCode.put(student.getStudentCode(), student);
+        }
+
+        String academicYear = autoAssign ? db.getCurrentAcademicYear() : null;
+        return new ImportLookupSnapshot(
+            paymentsByReceipt,
+            studentsByNormalizedName,
+            studentsByCode,
+            db.getMaxStudentSequence(),
+            autoAssign,
+            academicYear
+        );
+    }
+
+    private record ImportLookupSnapshot(
+        Map<ReceiptKey, Payment> paymentsByReceipt,
+        Map<String, List<Student>> studentsByNormalizedName,
+        Map<String, Student> studentsByCode,
+        int maxStudentSequence,
+        boolean autoAssign,
+        String academicYear
+    ) {}
 
     /**
      * Check if preview item is an exact duplicate of existing payment.
      */
-    private boolean isExactDuplicate(ImportPreviewItem item, Payment existing) {
-        // Create temporary payment from item for comparison
-        Payment itemPayment = new Payment(
+    private boolean isExactDuplicate(ImportPreviewItem item, Payment existing,
+                                     boolean autoAssign, String academicYear) {
+        Payment itemPayment = paymentFromItem(item);
+        if (existing.getAcademicYear() != null && autoAssign) {
+            itemPayment.setAcademicYear(academicYear);
+        }
+
+        return itemPayment.isExactDuplicateOf(existing);
+    }
+
+    private Payment paymentFromItem(ImportPreviewItem item) {
+        Payment payment = new Payment(
             item.getReceiptNumber(),
             item.getStudentName(),
             item.getProgram(),
@@ -175,13 +397,26 @@ public class ImportService {
             item.getReceivedBy(),
             item.getRemarks()
         );
-        itemPayment.setRemittanceDate(item.getRemittanceDate());
-        itemPayment.setChargeAcademicTerm(item.getChargeAcademicTerm());
-        if (existing.getAcademicYear() != null && db.isAutoAssignCurrentTerm()) {
-            itemPayment.setAcademicYear(db.getCurrentAcademicYear());
-        }
+        payment.setRemittanceDate(item.getRemittanceDate());
+        payment.setChargeAcademicTerm(item.getChargeAcademicTerm());
+        payment.setReceiptAcademicYear(item.getReceiptAcademicYear());
+        payment.setReceiptTerm(item.getReceiptTerm());
+        return payment;
+    }
 
-        return itemPayment.isExactDuplicateOf(existing);
+    private void updateFileSummaries(List<ImportPreviewItem> items, List<ImportBatchFile> files) {
+        for (ImportBatchFile file : files) {
+            List<ImportPreviewItem> fileItems = items.stream()
+                .filter(item -> Objects.equals(file.getFileName(), item.getSourceFileName()))
+                .filter(item -> Objects.equals(file.getReceiptAcademicYear(), item.getReceiptAcademicYear()))
+                .filter(item -> file.getReceiptTerm() == item.getReceiptTerm())
+                .toList();
+            file.setTotalRows(fileItems.size());
+            file.setNewRecords((int) fileItems.stream().filter(ImportPreviewItem::isNew).count());
+            file.setDuplicateRecords((int) fileItems.stream().filter(ImportPreviewItem::isDuplicate).count());
+            file.setConflictRecords((int) fileItems.stream().filter(ImportPreviewItem::isConflict).count());
+            file.setErrorRecords((int) fileItems.stream().filter(ImportPreviewItem::isError).count());
+        }
     }
 
     /**
@@ -189,53 +424,13 @@ public class ImportService {
      */
     private String generateBatchCode() {
         try {
-            List<ImportBatch> batches = db.getAllImportBatches();
             int year = LocalDateTime.now().getYear();
-            int maxNum = 0;
-            for (ImportBatch b : batches) {
-                if (b.getBatchCode() != null && b.getBatchCode().startsWith("IMP-" + year + "-")) {
-                    try {
-                        int num = Integer.parseInt(b.getBatchCode().substring(("IMP-" + year + "-").length()));
-                        if (num > maxNum) maxNum = num;
-                    } catch (NumberFormatException ignored) {}
-                }
-            }
+            int maxNum = db.getMaxImportBatchSequence(year);
             return String.format("IMP-%d-%04d", year, maxNum + 1);
         } catch (Exception e) {
             // Fallback
             return "IMP-" + LocalDateTime.now().getYear() + "-" + System.currentTimeMillis() % 10000;
         }
-    }
-
-    /**
-     * Generate a proposed student code for new students
-     */
-    private String generateProposedStudentCode() {
-        try {
-            List<Student> students = db.getAllStudents();
-            int maxSeq = 0;
-            for (Student s : students) {
-                int seq = StudentCodeGenerator.extractSequence(s.getStudentCode());
-                if (seq > maxSeq) maxSeq = seq;
-            }
-            return StudentCodeGenerator.generate(maxSeq + 1);
-        } catch (Exception e) {
-            return StudentCodeGenerator.generate(1);
-        }
-    }
-
-    /**
-     * Get the maximum student sequence number from database.
-     * Called once at start of transaction to avoid conflicts.
-     */
-    private int getMaxStudentSequence() throws Exception {
-        List<Student> students = db.getAllStudents();
-        int maxSeq = 0;
-        for (Student s : students) {
-            int seq = StudentCodeGenerator.extractSequence(s.getStudentCode());
-            if (seq > maxSeq) maxSeq = seq;
-        }
-        return maxSeq;
     }
 
     /**
@@ -252,6 +447,10 @@ public class ImportService {
 
         db.beginTransaction();
         try {
+            batch.setFileCount(previewResult.getFiles().size());
+            batch.setStatus(ImportBatch.STATUS_PROCESSING);
+            db.insertImportBatch(batch);
+
             int newRecords = 0;
             int duplicateRecords = 0;
             int conflictRecords = 0;
@@ -260,8 +459,10 @@ public class ImportService {
             // Track student codes assigned in this import to avoid duplicates
             Map<String, String> newStudentCodes = new HashMap<>(); // normalizedName -> studentCode
 
-            // Get max existing sequence once at start of transaction
-            int nextStudentSeq = getMaxStudentSequence();
+            // Read shared values once instead of querying for every imported row.
+            int nextStudentSeq = db.getMaxStudentSequence();
+            boolean autoAssign = db.isAutoAssignCurrentTerm();
+            String currentAcademicYear = autoAssign ? db.getCurrentAcademicYear() : null;
 
             for (ImportPreviewItem item : items) {
                 if (item.isError()) {
@@ -335,21 +536,18 @@ public class ImportService {
                     payment.setStatus(Payment.STATUS_ACTIVE);
                     // Set charge academic term from preview item
                     payment.setChargeAcademicTerm(item.getChargeAcademicTerm());
-                    if (db.isAutoAssignCurrentTerm()) {
-                        payment.setAcademicYear(db.getCurrentAcademicYear());
+                    payment.setReceiptAcademicYear(item.getReceiptAcademicYear());
+                    payment.setReceiptTerm(item.getReceiptTerm());
+                    payment.setImportBatchCode(batch.getBatchCode());
+                    payment.setImportSourceFile(item.getSourceFileName());
+                    payment.setImportSourceRow(item.getRowNumber());
+                    if (autoAssign) {
+                        payment.setAcademicYear(currentAcademicYear);
                     }
                     db.insertPayment(payment);
 
                     // Log payment creation
                     auditService.logPaymentCreated(payment, batch.getImportedBy());
-
-                    // Count as new payment (student already counted if new)
-                    if (item.isNew() && newStudentCodes.get(NameNormalizer.normalize(studentName)) == studentCode) {
-                        // Student was already counted above
-                    } else {
-                        // Payment for existing student
-                        // Don't double-count
-                    }
                 }
             }
 
@@ -360,7 +558,14 @@ public class ImportService {
             batch.setErrorRecords(errorRecords);
             batch.setStatus(ImportBatch.STATUS_COMPLETED);
             batch.setUpdatedAt(LocalDateTime.now());
-            db.insertImportBatch(batch);
+            db.updateImportBatch(batch);
+
+            updateFileSummaries(items, previewResult.getFiles());
+            for (ImportBatchFile file : previewResult.getFiles()) {
+                file.setBatchCode(batch.getBatchCode());
+                file.setStatus(ImportBatchFile.STATUS_COMPLETED);
+                db.insertImportBatchFile(file);
+            }
 
             // Log audit via AuditService
             auditService.logImportBatch(batch, batch.getImportedBy());

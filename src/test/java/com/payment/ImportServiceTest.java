@@ -8,6 +8,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -52,6 +54,7 @@ public class ImportServiceTest {
              var stmt = conn.createStatement()) {
             stmt.execute("DELETE FROM payments");
             stmt.execute("DELETE FROM students");
+            stmt.execute("DELETE FROM import_batch_files");
             stmt.execute("DELETE FROM import_batches");
             stmt.execute("DELETE FROM audit_logs");
         }
@@ -294,6 +297,172 @@ public class ImportServiceTest {
 
         // Cleanup
         new File(ambiguousFile).delete();
+    }
+
+    @Test
+    @Order(6)
+    void testPreviewAllocatesStableUniqueCodesAfterCurrentMaximum() throws Exception {
+        Student existing = new Student("Existing, Student");
+        existing.setStudentCode("STU-000125");
+        existing.setProgram("CS-4");
+        db.insertStudent(existing);
+
+        ImportPreviewResult preview = importService.generatePreview(testFile, LocalDate.now(), "testuser");
+
+        Set<String> proposedCodes = preview.getItems().stream()
+            .map(ImportPreviewItem::getProposedStudentCode)
+            .collect(Collectors.toSet());
+        assertEquals(Set.of("STU-000126", "STU-000127"), proposedCodes);
+
+        List<ImportPreviewItem> repeatedStudentRows = preview.getItems().stream()
+            .filter(item -> "Test, Student One".equals(item.getStudentName()))
+            .collect(Collectors.toList());
+        assertEquals(2, repeatedStudentRows.size());
+        assertEquals(repeatedStudentRows.get(0).getProposedStudentCode(),
+            repeatedStudentRows.get(1).getProposedStudentCode());
+    }
+
+    @Test
+    @Order(7)
+    void testReceiptNumbersCanRepeatAcrossSemestersButNotWithinSemester() throws Exception {
+        ImportPreviewResult firstSemester = importService.generatePreview(
+            List.of(testFile), LocalDate.now(), "testuser", "2026-2027", ChargeAcademicTerm.FIRST_SEM);
+        importService.commitImport(firstSemester);
+
+        Payment scopedDuplicate = new Payment(
+            10001, "Test, Student One", "CS-1", 150.0, 200.0, null, null, "Admin", "duplicate");
+        scopedDuplicate.setStudentId("STU-000001");
+        scopedDuplicate.setReceiptAcademicYear("2026-2027");
+        scopedDuplicate.setReceiptTerm(ChargeAcademicTerm.FIRST_SEM);
+        assertThrows(java.sql.SQLException.class, () -> db.insertPayment(scopedDuplicate));
+
+        ImportPreviewResult secondSemester = importService.generatePreview(
+            List.of(testFile), LocalDate.now(), "testuser", "2026-2027", ChargeAcademicTerm.SECOND_SEM);
+        assertEquals(3, secondSemester.getNewCount());
+        assertEquals(0, secondSemester.getDuplicateCount());
+        assertEquals(0, secondSemester.getConflictCount());
+        importService.commitImport(secondSemester);
+
+        List<Payment> stored = db.getAllPayments();
+        assertEquals(6, stored.size());
+        assertEquals(2, stored.stream().filter(p -> p.getReceiptNumber() == 10001).count());
+        assertEquals(Set.of(ChargeAcademicTerm.FIRST_SEM, ChargeAcademicTerm.SECOND_SEM),
+            stored.stream()
+                .filter(p -> p.getReceiptNumber() == 10001)
+                .map(Payment::getReceiptTerm)
+                .collect(Collectors.toSet()));
+
+        ImportPreviewResult repeatedSecondSemester = importService.generatePreview(
+            List.of(testFile), LocalDate.now(), "testuser", "2026-2027", ChargeAcademicTerm.SECOND_SEM);
+        assertEquals(3, repeatedSecondSemester.getDuplicateCount());
+    }
+
+    @Test
+    @Order(8)
+    void testMultipleSpreadsheetsCommitAsOneBatchWithFileProvenance() throws Exception {
+        String secondFile = createSingleRowExcelFile(
+            "test_import_second.xlsx", 10001, "Batch, Student Two", 275.0);
+        try {
+            ImportPreviewResult preview = importService.generateBatchPreview(
+                List.of(
+                    new ImportFileSelection(testFile, "2026-2027", ChargeAcademicTerm.FIRST_SEM),
+                    new ImportFileSelection(secondFile, "2026-2027", ChargeAcademicTerm.SECOND_SEM)
+                ),
+                LocalDate.now(),
+                "testuser"
+            );
+
+            assertEquals(2, preview.getFileCount());
+            assertEquals(4, preview.getTotalItems());
+            assertEquals("Multiple periods", preview.getBatch().getReceiptPeriodDisplay());
+            assertEquals(0, preview.getConflictCount());
+            assertEquals(0, preview.getDuplicateCount());
+            assertEquals(Set.of("test_import.xlsx", "test_import_second.xlsx"),
+                preview.getItems().stream()
+                    .map(ImportPreviewItem::getSourceFileName)
+                    .collect(Collectors.toSet()));
+
+            ImportResult result = importService.commitImport(preview);
+            assertEquals(ImportBatch.STATUS_COMPLETED, result.getBatch().getStatus());
+            assertEquals(2, result.getBatch().getFileCount());
+            assertEquals(2, db.getImportBatchFiles(result.getBatch().getBatchCode()).size());
+
+            List<Payment> stored = db.getAllPayments();
+            assertEquals(4, stored.size());
+            assertTrue(stored.stream().allMatch(p -> result.getBatch().getBatchCode().equals(p.getImportBatchCode())));
+            assertTrue(stored.stream().allMatch(p -> p.getImportSourceFile() != null));
+            assertTrue(stored.stream().allMatch(p -> p.getImportSourceRow() != null && p.getImportSourceRow() >= 2));
+            assertEquals(2, stored.stream().filter(p -> p.getReceiptNumber() == 10001).count());
+            assertEquals(Set.of(ChargeAcademicTerm.FIRST_SEM, ChargeAcademicTerm.SECOND_SEM),
+                stored.stream().map(Payment::getReceiptTerm).collect(Collectors.toSet()));
+            assertEquals(Set.of(ChargeAcademicTerm.FIRST_SEM, ChargeAcademicTerm.SECOND_SEM),
+                db.getImportBatchFiles(result.getBatch().getBatchCode()).stream()
+                    .map(ImportBatchFile::getReceiptTerm)
+                    .collect(Collectors.toSet()));
+        } finally {
+            new File(secondFile).delete();
+        }
+    }
+
+    @Test
+    @Order(9)
+    void testMultipleSpreadsheetCommitRollsBackAsOneTransaction() throws Exception {
+        String secondFile = createSingleRowExcelFile(
+            "test_import_atomic.xlsx", 30001, "Atomic, Student", 325.0);
+        try {
+            ImportPreviewResult preview = importService.generatePreview(
+                List.of(testFile, secondFile), LocalDate.now(), "testuser",
+                "2026-2027", ChargeAcademicTerm.FIRST_SEM);
+
+            // Simulate another writer claiming a receipt after preview but
+            // before commit. The database uniqueness rule must abort the whole batch.
+            Student blocker = new Student("Concurrent, Student");
+            blocker.setStudentCode("STU-000900");
+            blocker.setProgram("IT-1");
+            db.insertStudent(blocker);
+            Payment claimedReceipt = new Payment(
+                30001, blocker.getName(), blocker.getProgram(), 325.0, null, null, null,
+                "Admin", "Concurrent claim");
+            claimedReceipt.setStudentId(blocker.getStudentCode());
+            claimedReceipt.setReceiptAcademicYear("2026-2027");
+            claimedReceipt.setReceiptTerm(ChargeAcademicTerm.FIRST_SEM);
+            db.insertPayment(claimedReceipt);
+
+            assertThrows(Exception.class, () -> importService.commitImport(preview));
+
+            assertEquals(1, db.getAllPayments().size());
+            assertEquals(1, db.getAllStudents().size());
+            assertTrue(db.getAllImportBatches().isEmpty());
+            assertTrue(db.getImportBatchFiles(preview.getBatch().getBatchCode()).isEmpty());
+            assertTrue(db.getAuditLogs(100).isEmpty());
+        } finally {
+            new File(secondFile).delete();
+        }
+    }
+
+    private String createSingleRowExcelFile(String fileName, int receiptNumber,
+                                            String studentName, double intelFee) throws IOException {
+        try (Workbook wb = new XSSFWorkbook();
+             FileOutputStream fos = new FileOutputStream(fileName)) {
+            Sheet sheet = wb.createSheet("Payments");
+            Row header = sheet.createRow(0);
+            String[] headers = {"#", "Receipt #", "Name", "Program", "Intel Fee", "Tshirt Sizing", "Penalties", "CIT Night", "Received by", "Remarks"};
+            for (int i = 0; i < headers.length; i++) header.createCell(i).setCellValue(headers[i]);
+
+            Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue(1);
+            row.createCell(1).setCellValue(receiptNumber);
+            row.createCell(2).setCellValue(studentName);
+            row.createCell(3).setCellValue("CS-1");
+            row.createCell(4).setCellValue(intelFee);
+            row.createCell(5).setCellValue(0);
+            row.createCell(6).setCellValue(0);
+            row.createCell(7).setCellValue(0);
+            row.createCell(8).setCellValue("Admin");
+            row.createCell(9).setCellValue("Multi-file batch test");
+            wb.write(fos);
+        }
+        return fileName;
     }
 
     private String createAmbiguousExcelFile() throws IOException {

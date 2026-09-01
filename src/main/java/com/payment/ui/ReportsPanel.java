@@ -322,7 +322,7 @@ public class ReportsPanel extends JPanel {
             protected Void doInBackground() throws Exception {
                 if (reportType.contains("Student Payment Report")) {
                     data = generateStudentPaymentReportSeparatedByTerm();
-                    columns = new String[]{"Academic Year", "Term", "Student Code", "Name", "Program", "Receipt #", "Date", "Intel Fee", "T-Shirt", "Penalties", "CIT Night", "Received By", "Term Total"};
+                    columns = new String[]{"Academic Year", "Term", "Student Code", "Name", "Program", "Receipt #", "Receipt AY", "Receipt Term", "Date", "Intel Fee", "T-Shirt", "Penalties", "CIT Night", "Received By", "Term Total"};
                 } else if (reportType.contains("Academic Term Report")) {
                     data = generateAcademicTermReport();
                     columns = new String[]{"Academic Year", "Term", "Intel Fee", "T-Shirt", "Penalties", "CIT Night", "Total Amount"};
@@ -337,7 +337,7 @@ public class ReportsPanel extends JPanel {
                     columns = new String[]{"Received By", "Receipt Count", "Total Amount"};
                 } else if (reportType.contains("Import Batch Report")) {
                     data = generateImportBatchReport();
-                    columns = new String[]{"Batch Code", "File", "Imported At", "Remittance Date", "Records", "New", "Duplicates", "Conflicts", "Errors", "Status"};
+                    columns = new String[]{"Batch Code", "Source", "Files", "Receipt Period", "Imported At", "Remittance Date", "Records", "New", "Duplicates", "Conflicts", "Errors", "Status"};
                 }
 
                 // Compute grand total for active financial columns
@@ -387,7 +387,7 @@ public class ReportsPanel extends JPanel {
                 reportTable.getColumnModel().getColumn(i).setCellRenderer(currencyRenderer);
             } else if (name.contains("Count") || name.contains("Records") || name.equals("New") || name.equals("Duplicates") || name.equals("Conflicts") || name.equals("Errors")) {
                 reportTable.getColumnModel().getColumn(i).setCellRenderer(rightRenderer);
-            } else if (name.contains("Date") || name.equals("Academic Year") || name.equals("Term") || name.equals("Receipt #") || name.equals("Student Code") || name.equals("Status") || name.equals("Batch Code")) {
+            } else if (name.contains("Date") || name.equals("Academic Year") || name.equals("Term") || name.startsWith("Receipt") || name.equals("Student Code") || name.equals("Status") || name.equals("Batch Code")) {
                 reportTable.getColumnModel().getColumn(i).setCellRenderer(centerCyanRenderer);
             } else {
                 reportTable.getColumnModel().getColumn(i).setCellRenderer(defaultRenderer);
@@ -483,6 +483,8 @@ public class ReportsPanel extends JPanel {
                 row.put("Name", p.getName());
                 row.put("Program", p.getProgram() != null ? p.getProgram() : "-");
                 row.put("Receipt #", p.getReceiptNumber());
+                row.put("Receipt AY", p.getReceiptAcademicYear() != null ? p.getReceiptAcademicYear() : "-");
+                row.put("Receipt Term", p.getReceiptTerm().getLabel());
                 row.put("Date", p.getRemittanceDate() != null ? p.getRemittanceDate().format(fmt) : "-");
                 row.put("Intel Fee", fs.intelFee);
                 row.put("T-Shirt", fs.tshirt);
@@ -704,7 +706,9 @@ public class ReportsPanel extends JPanel {
             .map(b -> {
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("Batch Code", b.getBatchCode());
-                row.put("File", b.getFileName());
+                row.put("Source", b.getFileName());
+                row.put("Files", b.getFileCount());
+                row.put("Receipt Period", b.getReceiptPeriodDisplay());
                 row.put("Imported At", b.getImportedAt() != null ? b.getImportedAt().format(fmt) : "-");
                 row.put("Remittance Date", b.getRemittanceDate() != null ? b.getRemittanceDate().format(remFmt) : "-");
                 row.put("Records", b.getTotalRows());

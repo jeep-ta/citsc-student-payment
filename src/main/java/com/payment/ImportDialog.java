@@ -1,6 +1,7 @@
 package com.payment;
 
 import com.payment.ui.ThemeUtils;
+import com.payment.database.DatabaseManager;
 
 import javax.swing.*;
 import javax.swing.table.*;
@@ -9,6 +10,7 @@ import java.awt.event.*;
 import java.io.File;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -18,15 +20,20 @@ import java.util.List;
 public class ImportDialog extends JDialog {
 
     private final ImportService importService;
+    private final DatabaseManager db;
     private ImportPreviewResult previewResult;
-    private File selectedFile;
+    private final SelectedFilesTableModel selectedFilesTableModel = new SelectedFilesTableModel();
     private LocalDate remittanceDate;
 
     // UI Components
     private JFileChooser fileChooser;
     private JSpinner dateSpinner;
+    private JComboBox<String> receiptYearCombo;
+    private JComboBox<ChargeAcademicTerm> receiptTermCombo;
+    private JTable selectedFilesTable;
     private JTextField filePathField;
     private JButton browseButton;
+    private JButton applyReceiptPeriodButton;
     private JButton previewButton;
     private JButton importButton;
     private JButton cancelButton;
@@ -44,6 +51,7 @@ public class ImportDialog extends JDialog {
     public ImportDialog(JFrame parent, ImportService importService) {
         super(parent, "Import Payments from Excel", true);
         this.importService = importService;
+        this.db = DatabaseManager.getInstance();
         this.remittanceDate = LocalDate.now();
 
         initializeUI();
@@ -64,6 +72,10 @@ public class ImportDialog extends JDialog {
         JPanel centerPanel = createCenterPanel();
         add(centerPanel, BorderLayout.CENTER);
 
+        selectedFilesTableModel.addTableModelListener(event -> {
+            if (previewResult != null) clearPreview();
+        });
+
         // Bottom panel: Buttons and progress
         JPanel bottomPanel = createBottomPanel();
         add(bottomPanel, BorderLayout.SOUTH);
@@ -82,7 +94,7 @@ public class ImportDialog extends JDialog {
 
         // File selection
         gbc.gridx = 0; gbc.gridy = 0;
-        JLabel fileLbl = new JLabel("Excel File:");
+        JLabel fileLbl = new JLabel("Excel Files:");
         fileLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
         panel.add(fileLbl, gbc);
 
@@ -111,8 +123,66 @@ public class ImportDialog extends JDialog {
         dateSpinner.setValue(java.sql.Date.valueOf(remittanceDate));
         panel.add(dateSpinner, gbc);
 
+        // Receipt issuance period (separate from fee attribution)
+        gbc.gridx = 0; gbc.gridy = 2; gbc.weightx = 0;
+        JLabel periodLbl = new JLabel("Default Receipt Period:");
+        periodLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(periodLbl, gbc);
+
+        JPanel periodPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        periodPanel.setOpaque(false);
+        receiptYearCombo = new JComboBox<>(new String[]{
+            "2024-2025", "2025-2026", "2026-2027", "2027-2028"
+        });
+        receiptYearCombo.setEditable(true);
+        receiptYearCombo.setSelectedItem(db.getCurrentAcademicYear());
+        receiptTermCombo = new JComboBox<>(new ChargeAcademicTerm[]{
+            ChargeAcademicTerm.FIRST_SEM,
+            ChargeAcademicTerm.SECOND_SEM,
+            ChargeAcademicTerm.SUMMER
+        });
+        ChargeAcademicTerm currentTerm = db.getCurrentAcademicTerm();
+        receiptTermCombo.setSelectedItem(ReceiptKey.isConcreteTerm(currentTerm)
+            ? currentTerm : ChargeAcademicTerm.FIRST_SEM);
+        periodPanel.add(receiptYearCombo);
+        periodPanel.add(receiptTermCombo);
+        gbc.gridx = 1; gbc.gridy = 2; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(periodPanel, gbc);
+
+        applyReceiptPeriodButton = new JButton("Apply to All Files");
+        ThemeUtils.styleButton(applyReceiptPeriodButton, ThemeUtils.NEON_CYAN);
+        applyReceiptPeriodButton.setEnabled(false);
+        applyReceiptPeriodButton.addActionListener(e -> selectedFilesTableModel.applyPeriod(
+            selectedReceiptYear(), (ChargeAcademicTerm) receiptTermCombo.getSelectedItem()));
+        gbc.gridx = 2; gbc.gridy = 2; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
+        panel.add(applyReceiptPeriodButton, gbc);
+
+        selectedFilesTable = new JTable(selectedFilesTableModel);
+        selectedFilesTable.setRowHeight(22);
+        selectedFilesTable.getTableHeader().setReorderingAllowed(false);
+        ThemeUtils.applyTableTheme(selectedFilesTable);
+        selectedFilesTable.getColumnModel().getColumn(0).setPreferredWidth(360);
+        selectedFilesTable.getColumnModel().getColumn(1).setPreferredWidth(120);
+        selectedFilesTable.getColumnModel().getColumn(2).setPreferredWidth(140);
+        JComboBox<ChargeAcademicTerm> fileTermEditor = new JComboBox<>(new ChargeAcademicTerm[]{
+            ChargeAcademicTerm.FIRST_SEM,
+            ChargeAcademicTerm.SECOND_SEM,
+            ChargeAcademicTerm.SUMMER
+        });
+        selectedFilesTable.getColumnModel().getColumn(2).setCellEditor(new DefaultCellEditor(fileTermEditor));
+        JComboBox<String> fileYearEditor = new JComboBox<>(new String[]{
+            "2024-2025", "2025-2026", "2026-2027", "2027-2028"
+        });
+        fileYearEditor.setEditable(true);
+        selectedFilesTable.getColumnModel().getColumn(1).setCellEditor(new DefaultCellEditor(fileYearEditor));
+        JScrollPane selectedFilesScroll = new JScrollPane(selectedFilesTable);
+        selectedFilesScroll.setPreferredSize(new Dimension(620, 82));
+        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 3; gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        panel.add(selectedFilesScroll, gbc);
+
         // Preview button
-        gbc.gridx = 2; gbc.gridy = 1; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
+        gbc.gridx = 2; gbc.gridy = 4; gbc.gridwidth = 1; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
         previewButton = new JButton("⚡ Generate Preview");
         ThemeUtils.styleButton(previewButton, ThemeUtils.NEON_GREEN);
         previewButton.setEnabled(false);
@@ -133,7 +203,7 @@ public class ImportDialog extends JDialog {
         // Header panel with summary and batch term actions
         JPanel topPreviewPanel = new JPanel(new BorderLayout());
         topPreviewPanel.setBackground(ThemeUtils.BG_SURFACE);
-        summaryLabel = new JLabel("Select a file and click 'Generate Preview'");
+        summaryLabel = new JLabel("Select spreadsheets and click 'Generate Preview'");
         summaryLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
         summaryLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
         topPreviewPanel.add(summaryLabel, BorderLayout.WEST);
@@ -177,6 +247,8 @@ public class ImportDialog extends JDialog {
         previewTable.getColumnModel().getColumn(6).setPreferredWidth(130);  // Charge Term
         previewTable.getColumnModel().getColumn(7).setPreferredWidth(120);  // Matched Student
         previewTable.getColumnModel().getColumn(8).setPreferredWidth(200);  // Details
+        previewTable.getColumnModel().getColumn(9).setPreferredWidth(160);  // Source file
+        previewTable.getColumnModel().getColumn(10).setPreferredWidth(170); // Receipt period
 
         // Custom renderer for status column
         previewTable.getColumnModel().getColumn(5).setCellRenderer(new StatusCellRenderer());
@@ -285,28 +357,45 @@ public class ImportDialog extends JDialog {
             fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                 "Excel Files (*.xlsx)", "xlsx"));
             fileChooser.setCurrentDirectory(new File(System.getProperty("user.home")));
+            fileChooser.setMultiSelectionEnabled(true);
         }
 
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
-            selectedFile = fileChooser.getSelectedFile();
-            filePathField.setText(selectedFile.getAbsolutePath());
-            previewButton.setEnabled(true);
+            List<File> selectedFiles = new ArrayList<>();
+            File[] files = fileChooser.getSelectedFiles();
+            if (files != null && files.length > 0) {
+                selectedFiles.addAll(List.of(files));
+            } else if (fileChooser.getSelectedFile() != null) {
+                selectedFiles.add(fileChooser.getSelectedFile());
+            }
+            selectedFilesTableModel.setFiles(selectedFiles, selectedReceiptYear(),
+                (ChargeAcademicTerm) receiptTermCombo.getSelectedItem());
+            filePathField.setText(selectedFiles.size() == 1
+                ? selectedFiles.get(0).getAbsolutePath()
+                : selectedFiles.size() + " spreadsheets selected");
+            filePathField.setToolTipText(selectedFiles.stream()
+                .map(File::getName)
+                .collect(java.util.stream.Collectors.joining(", ")));
+            previewButton.setEnabled(!selectedFiles.isEmpty());
+            applyReceiptPeriodButton.setEnabled(!selectedFiles.isEmpty());
             clearPreview();
         }
     }
 
     private void generatePreview() {
-        if (selectedFile == null) {
-            JOptionPane.showMessageDialog(this, "Please select an Excel file first.", "No File", JOptionPane.WARNING_MESSAGE);
+        if (selectedFilesTableModel.getRowCount() == 0) {
+            JOptionPane.showMessageDialog(this, "Please select one or more Excel files first.", "No Files", JOptionPane.WARNING_MESSAGE);
             return;
+        }
+        if (selectedFilesTable.isEditing()) {
+            selectedFilesTable.getCellEditor().stopCellEditing();
         }
 
         // Get remittance date from spinner
         java.util.Date spinnerDate = (java.util.Date) dateSpinner.getValue();
-        remittanceDate = spinnerDate.toInstant()
-            .atZone(java.time.ZoneId.systemDefault())
-            .toLocalDate();
+        remittanceDate = new java.sql.Date(spinnerDate.getTime()).toLocalDate();
+        List<ImportFileSelection> selections = selectedFilesTableModel.getSelections();
 
         // Disable UI during preview generation
         setPreviewUIState(false);
@@ -318,7 +407,7 @@ public class ImportDialog extends JDialog {
         SwingWorker<ImportPreviewResult, Void> worker = new SwingWorker<>() {
             @Override
             protected ImportPreviewResult doInBackground() throws Exception {
-                return importService.generatePreview(selectedFile.getAbsolutePath(), remittanceDate, "user");
+                return importService.generateBatchPreview(selections, remittanceDate, "user");
             }
 
             @Override
@@ -349,14 +438,16 @@ public class ImportDialog extends JDialog {
     }
 
     private void clearPreview() {
+        previewResult = null;
         previewTableModel.setItems(null);
-        summaryLabel.setText("Select a file and click 'Generate Preview'");
+        summaryLabel.setText("Select spreadsheets and click 'Generate Preview'");
         importButton.setEnabled(false);
     }
 
     private void updateSummary(ImportPreviewResult result) {
         String summary = String.format(
-            "Total: %d | New: %d | Duplicates: %d | Conflicts: %d | Ambiguous: %d | Errors: %d",
+            "Files: %d | Total: %d | New: %d | Duplicates: %d | Conflicts: %d | Ambiguous: %d | Errors: %d",
+            result.getFileCount(),
             result.getTotalItems(),
             result.getNewCount(),
             result.getDuplicateCount(),
@@ -369,8 +460,12 @@ public class ImportDialog extends JDialog {
 
     private void setPreviewUIState(boolean enabled) {
         browseButton.setEnabled(enabled);
-        previewButton.setEnabled(enabled && selectedFile != null);
+        previewButton.setEnabled(enabled && selectedFilesTableModel.getRowCount() > 0);
         dateSpinner.setEnabled(enabled);
+        receiptYearCombo.setEnabled(enabled);
+        receiptTermCombo.setEnabled(enabled);
+        selectedFilesTable.setEnabled(enabled);
+        applyReceiptPeriodButton.setEnabled(enabled && selectedFilesTableModel.getRowCount() > 0);
         filePathField.setEnabled(enabled);
     }
 
@@ -398,11 +493,13 @@ public class ImportDialog extends JDialog {
         int confirm = JOptionPane.showConfirmDialog(this,
             String.format("Import %d new records?\n\n" +
                 "Batch: %s\n" +
-                "File: %s\n" +
+                "Files: %d\n" +
+                "Receipt Period: %s\n" +
                 "Remittance Date: %s",
                 previewResult.getNewCount(),
                 previewResult.getBatch().getBatchCode(),
-                previewResult.getBatch().getFileName(),
+                previewResult.getFileCount(),
+                previewResult.getBatch().getReceiptPeriodDisplay(),
                 previewResult.getBatch().getRemittanceDate()),
             "Confirm Import", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
 
@@ -463,24 +560,117 @@ public class ImportDialog extends JDialog {
         // Clear preview and reset
         clearPreview();
         filePathField.setText("");
-        selectedFile = null;
+        filePathField.setToolTipText(null);
+        selectedFilesTableModel.clear();
         previewButton.setEnabled(false);
+        applyReceiptPeriodButton.setEnabled(false);
     }
 
     private void setImportUIState(boolean enabled) {
         importButton.setEnabled(enabled && previewResult != null);
         cancelButton.setEnabled(enabled);
         browseButton.setEnabled(enabled);
-        previewButton.setEnabled(enabled && selectedFile != null);
+        previewButton.setEnabled(enabled && selectedFilesTableModel.getRowCount() > 0);
         dateSpinner.setEnabled(enabled);
+        receiptYearCombo.setEnabled(enabled);
+        receiptTermCombo.setEnabled(enabled);
+        selectedFilesTable.setEnabled(enabled);
+        applyReceiptPeriodButton.setEnabled(enabled && selectedFilesTableModel.getRowCount() > 0);
+    }
+
+    private String selectedReceiptYear() {
+        Object selected = receiptYearCombo.getSelectedItem();
+        return selected != null ? selected.toString().trim() : "";
     }
 
     // --- Table Model ---
 
+    private static class SelectedFilesTableModel extends AbstractTableModel {
+        private static final String[] COLUMNS = {"Spreadsheet", "Receipt AY", "Receipt Semester"};
+        private final List<ImportFileSelection> selections = new ArrayList<>();
+
+        public void setFiles(List<File> files, String academicYear, ChargeAcademicTerm term) {
+            selections.clear();
+            if (files != null) {
+                for (File file : files) {
+                    if (file != null) {
+                        selections.add(new ImportFileSelection(file.getAbsolutePath(), academicYear, term));
+                    }
+                }
+            }
+            fireTableDataChanged();
+        }
+
+        public void applyPeriod(String academicYear, ChargeAcademicTerm term) {
+            for (int i = 0; i < selections.size(); i++) {
+                ImportFileSelection current = selections.get(i);
+                selections.set(i, new ImportFileSelection(current.filePath(), academicYear, term));
+            }
+            if (selections.isEmpty()) fireTableDataChanged();
+            else fireTableRowsUpdated(0, selections.size() - 1);
+        }
+
+        public List<ImportFileSelection> getSelections() {
+            return List.copyOf(selections);
+        }
+
+        public void clear() {
+            selections.clear();
+            fireTableDataChanged();
+        }
+
+        @Override
+        public int getRowCount() { return selections.size(); }
+
+        @Override
+        public int getColumnCount() { return COLUMNS.length; }
+
+        @Override
+        public String getColumnName(int column) { return COLUMNS[column]; }
+
+        @Override
+        public Object getValueAt(int rowIndex, int columnIndex) {
+            ImportFileSelection selection = selections.get(rowIndex);
+            return switch (columnIndex) {
+                case 0 -> new File(selection.filePath()).getName();
+                case 1 -> selection.receiptAcademicYear();
+                case 2 -> selection.receiptTerm();
+                default -> null;
+            };
+        }
+
+        @Override
+        public boolean isCellEditable(int rowIndex, int columnIndex) {
+            return columnIndex == 1 || columnIndex == 2;
+        }
+
+        @Override
+        public void setValueAt(Object value, int rowIndex, int columnIndex) {
+            ImportFileSelection current = selections.get(rowIndex);
+            String year = current.receiptAcademicYear();
+            ChargeAcademicTerm term = current.receiptTerm();
+            if (columnIndex == 1) {
+                year = value != null ? value.toString().trim() : null;
+            } else if (columnIndex == 2) {
+                term = value instanceof ChargeAcademicTerm selectedTerm
+                    ? selectedTerm : ChargeAcademicTerm.fromCode(String.valueOf(value));
+            } else {
+                return;
+            }
+            selections.set(rowIndex, new ImportFileSelection(current.filePath(), year, term));
+            fireTableCellUpdated(rowIndex, columnIndex);
+        }
+
+        @Override
+        public Class<?> getColumnClass(int columnIndex) {
+            return columnIndex == 2 ? ChargeAcademicTerm.class : String.class;
+        }
+    }
+
     private static class PreviewTableModel extends AbstractTableModel {
         private static final String[] COLUMN_NAMES = {
             "Row", "Receipt #", "Student Name", "Program", "Amount", "Status",
-            "Charge Term", "Matched Student", "Details"
+            "Charge Term", "Matched Student", "Details", "Source File", "Receipt Period"
         };
 
         private List<ImportPreviewItem> items;
@@ -532,6 +722,8 @@ public class ImportDialog extends JDialog {
                     item.getMatchedStudentCode() + " - " + item.getMatchedStudentName() :
                     (item.getProposedStudentCode() != null ? item.getProposedStudentCode() + " (new)" : "");
                 case 8: return getDetails(item);
+                case 9: return item.getSourceFileName() != null ? item.getSourceFileName() : "";
+                case 10: return item.getReceiptKey().displayScope();
                 default: return null;
             }
         }

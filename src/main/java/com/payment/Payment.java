@@ -21,6 +21,16 @@ public class Payment {
     private LocalDate remittanceDate;
     private String status;            // ACTIVE or VOID (no hard delete)
 
+    // Period in which this receipt number was issued. This is intentionally
+    // separate from the term/AY to which individual fees are attributed.
+    private String receiptAcademicYear;
+    private ChargeAcademicTerm receiptTerm;
+
+    // Import provenance (null for manually-created or legacy records)
+    private String importBatchCode;
+    private String importSourceFile;
+    private Integer importSourceRow;
+
     // Receipt-level default term and AY
     private ChargeAcademicTerm chargeAcademicTerm; // Default term
     private String academicYear;                  // Default AY e.g. "2025-2026"
@@ -55,6 +65,7 @@ public class Payment {
         this.remarks = remarks;
         this.remittanceDate = LocalDate.now(); // Default to today
         this.status = STATUS_ACTIVE;
+        this.receiptTerm = ChargeAcademicTerm.UNASSIGNED;
         this.chargeAcademicTerm = ChargeAcademicTerm.UNASSIGNED;
         this.academicYear = null;
         this.createdAt = LocalDateTime.now();
@@ -65,6 +76,7 @@ public class Payment {
     public Payment() {
         this.remittanceDate = LocalDate.now();
         this.status = STATUS_ACTIVE;
+        this.receiptTerm = ChargeAcademicTerm.UNASSIGNED;
         this.chargeAcademicTerm = ChargeAcademicTerm.UNASSIGNED;
         this.academicYear = null;
         this.createdAt = LocalDateTime.now();
@@ -123,6 +135,16 @@ public class Payment {
     public String getStatus() {
         return status;
     }
+
+    public String getReceiptAcademicYear() { return receiptAcademicYear; }
+    public ChargeAcademicTerm getReceiptTerm() {
+        return receiptTerm != null ? receiptTerm : ChargeAcademicTerm.UNASSIGNED;
+    }
+    public String getReceiptTermCode() { return getReceiptTerm().getCode(); }
+    public String getImportBatchCode() { return importBatchCode; }
+    public String getImportSourceFile() { return importSourceFile; }
+    public Integer getImportSourceRow() { return importSourceRow; }
+    public ReceiptKey getReceiptKey() { return ReceiptKey.from(this); }
 
     public boolean isVoid() {
         return STATUS_VOID.equals(status);
@@ -304,6 +326,25 @@ public class Payment {
         this.updatedAt = LocalDateTime.now();
     }
 
+    public void setReceiptAcademicYear(String receiptAcademicYear) {
+        this.receiptAcademicYear = receiptAcademicYear != null && !receiptAcademicYear.isBlank()
+            ? receiptAcademicYear.trim() : null;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void setReceiptTerm(ChargeAcademicTerm receiptTerm) {
+        this.receiptTerm = receiptTerm != null ? receiptTerm : ChargeAcademicTerm.UNASSIGNED;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void setReceiptTermCode(String code) {
+        setReceiptTerm(ChargeAcademicTerm.fromCode(code));
+    }
+
+    public void setImportBatchCode(String importBatchCode) { this.importBatchCode = importBatchCode; }
+    public void setImportSourceFile(String importSourceFile) { this.importSourceFile = importSourceFile; }
+    public void setImportSourceRow(Integer importSourceRow) { this.importSourceRow = importSourceRow; }
+
     public void setChargeAcademicTerm(ChargeAcademicTerm chargeAcademicTerm) {
         this.chargeAcademicTerm = chargeAcademicTerm != null ? chargeAcademicTerm : ChargeAcademicTerm.UNASSIGNED;
         this.updatedAt = LocalDateTime.now();
@@ -348,6 +389,8 @@ public class Payment {
     public boolean isExactDuplicateOf(Payment other) {
         if (other == null) return false;
         return receiptNumber == other.receiptNumber
+            && equalsNullable(receiptAcademicYear, other.receiptAcademicYear)
+            && equalsNullable(getReceiptTerm(), other.getReceiptTerm())
             && equalsNullable(program, other.program)
             && equalsNullable(intelFee, other.intelFee)
             && equalsNullable(tshirtSizing, other.tshirtSizing)
@@ -369,6 +412,7 @@ public class Payment {
     @Override
     public String toString() {
         String voidTag = isVoid() ? " [VOID]" : "";
-        return "Receipt #" + receiptNumber + " - " + program + " - Total: ₱" + String.format("%,.2f", getTotalAmount()) + voidTag;
+        String scope = getReceiptKey().hasDefinedScope() ? " [" + getReceiptKey().displayScope() + "]" : "";
+        return "Receipt #" + receiptNumber + scope + " - " + program + " - Total: ₱" + String.format("%,.2f", getTotalAmount()) + voidTag;
     }
 }
