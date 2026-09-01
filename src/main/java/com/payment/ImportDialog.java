@@ -1,5 +1,7 @@
 package com.payment;
 
+import com.payment.ui.ThemeUtils;
+
 import javax.swing.*;
 import javax.swing.table.*;
 import java.awt.*;
@@ -52,6 +54,7 @@ public class ImportDialog extends JDialog {
 
     private void initializeUI() {
         setLayout(new BorderLayout());
+        getContentPane().setBackground(ThemeUtils.BG_DEEPEST);
 
         // Top panel: File selection and remittance date
         JPanel topPanel = createTopPanel();
@@ -68,14 +71,20 @@ public class ImportDialog extends JDialog {
 
     private JPanel createTopPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("Import Settings"));
+        panel.setBackground(ThemeUtils.BG_CARD);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+            ThemeUtils.styleTitledBorder("Import Settings", ThemeUtils.NEON_CYAN),
+            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        ));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.anchor = GridBagConstraints.WEST;
 
         // File selection
         gbc.gridx = 0; gbc.gridy = 0;
-        panel.add(new JLabel("Excel File:"), gbc);
+        JLabel fileLbl = new JLabel("Excel File:");
+        fileLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(fileLbl, gbc);
 
         gbc.gridx = 1; gbc.gridy = 0; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
         filePathField = new JTextField();
@@ -83,13 +92,16 @@ public class ImportDialog extends JDialog {
         panel.add(filePathField, gbc);
 
         gbc.gridx = 2; gbc.gridy = 0; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-        browseButton = new JButton("Browse...");
+        browseButton = new JButton("📂 Browse...");
+        ThemeUtils.styleButton(browseButton, ThemeUtils.NEON_CYAN);
         browseButton.addActionListener(e -> browseFile());
         panel.add(browseButton, gbc);
 
         // Remittance date
         gbc.gridx = 0; gbc.gridy = 1;
-        panel.add(new JLabel("Remittance Date:"), gbc);
+        JLabel dateLbl = new JLabel("Remittance Date:");
+        dateLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(dateLbl, gbc);
 
         gbc.gridx = 1; gbc.gridy = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
         SpinnerDateModel dateModel = new SpinnerDateModel();
@@ -101,7 +113,8 @@ public class ImportDialog extends JDialog {
 
         // Preview button
         gbc.gridx = 2; gbc.gridy = 1; gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
-        previewButton = new JButton("Generate Preview");
+        previewButton = new JButton("⚡ Generate Preview");
+        ThemeUtils.styleButton(previewButton, ThemeUtils.NEON_GREEN);
         previewButton.setEnabled(false);
         previewButton.addActionListener(e -> generatePreview());
         panel.add(previewButton, gbc);
@@ -110,13 +123,41 @@ public class ImportDialog extends JDialog {
     }
 
     private JPanel createCenterPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("Import Preview"));
+        JPanel panel = new JPanel(new BorderLayout(5, 5));
+        panel.setBackground(ThemeUtils.BG_SURFACE);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+            ThemeUtils.styleTitledBorder("Import Preview", ThemeUtils.NEON_PURPLE),
+            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        ));
 
-        // Summary label
+        // Header panel with summary and batch term actions
+        JPanel topPreviewPanel = new JPanel(new BorderLayout());
+        topPreviewPanel.setBackground(ThemeUtils.BG_SURFACE);
         summaryLabel = new JLabel("Select a file and click 'Generate Preview'");
+        summaryLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
         summaryLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-        panel.add(summaryLabel, BorderLayout.NORTH);
+        topPreviewPanel.add(summaryLabel, BorderLayout.WEST);
+
+        JPanel batchTermPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        batchTermPanel.setBackground(ThemeUtils.BG_SURFACE);
+        JButton setAllCurrentBtn = new JButton("Set All Eligible to Current Term");
+        JButton setAllPrevBtn = new JButton("Set All Eligible to Previous Term");
+        setAllCurrentBtn.setFont(setAllCurrentBtn.getFont().deriveFont(11f));
+        setAllPrevBtn.setFont(setAllPrevBtn.getFont().deriveFont(11f));
+        ThemeUtils.styleButton(setAllCurrentBtn, ThemeUtils.NEON_CYAN);
+        ThemeUtils.styleButton(setAllPrevBtn, ThemeUtils.NEON_AMBER);
+
+        setAllCurrentBtn.addActionListener(e -> setAllEligibleTerms(ChargeAcademicTerm.CURRENT));
+        setAllPrevBtn.addActionListener(e -> setAllEligibleTerms(ChargeAcademicTerm.PREVIOUS));
+
+        JLabel quickLabel = new JLabel("Quick Term Assign:");
+        quickLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        batchTermPanel.add(quickLabel);
+        batchTermPanel.add(setAllCurrentBtn);
+        batchTermPanel.add(setAllPrevBtn);
+        topPreviewPanel.add(batchTermPanel, BorderLayout.EAST);
+
+        panel.add(topPreviewPanel, BorderLayout.NORTH);
 
         // Preview table
         previewTableModel = new PreviewTableModel();
@@ -124,6 +165,7 @@ public class ImportDialog extends JDialog {
         previewTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         previewTable.setAutoCreateRowSorter(true);
         previewTable.getTableHeader().setReorderingAllowed(false);
+        ThemeUtils.applyTableTheme(previewTable);
 
         // Set column widths
         previewTable.getColumnModel().getColumn(0).setPreferredWidth(50);   // Row
@@ -132,43 +174,103 @@ public class ImportDialog extends JDialog {
         previewTable.getColumnModel().getColumn(3).setPreferredWidth(100);  // Program
         previewTable.getColumnModel().getColumn(4).setPreferredWidth(100);  // Amount
         previewTable.getColumnModel().getColumn(5).setPreferredWidth(100);  // Status
-        previewTable.getColumnModel().getColumn(6).setPreferredWidth(120);  // Matched Student
-        previewTable.getColumnModel().getColumn(7).setPreferredWidth(200);  // Details
+        previewTable.getColumnModel().getColumn(6).setPreferredWidth(130);  // Charge Term
+        previewTable.getColumnModel().getColumn(7).setPreferredWidth(120);  // Matched Student
+        previewTable.getColumnModel().getColumn(8).setPreferredWidth(200);  // Details
 
         // Custom renderer for status column
         previewTable.getColumnModel().getColumn(5).setCellRenderer(new StatusCellRenderer());
 
+        // Combo box editor for Charge Term column
+        JComboBox<String> termComboBox = new JComboBox<>();
+        termComboBox.addItem(ChargeAcademicTerm.CURRENT.getLabel());
+        termComboBox.addItem(ChargeAcademicTerm.PREVIOUS.getLabel());
+        termComboBox.addItem(ChargeAcademicTerm.UNASSIGNED.getLabel());
+        previewTable.getColumnModel().getColumn(6).setCellEditor(new DefaultCellEditor(termComboBox));
+
+        // Context menu on preview table
+        JPopupMenu popupMenu = new JPopupMenu();
+        JMenuItem setCurrItem = new JMenuItem("Set to Current Term");
+        JMenuItem setPrevItem = new JMenuItem("Set to Previous Term");
+        JMenuItem setUnassignedItem = new JMenuItem("Set to Unassigned");
+
+        setCurrItem.addActionListener(e -> setChargeTermForSelectedPreview(ChargeAcademicTerm.CURRENT));
+        setPrevItem.addActionListener(e -> setChargeTermForSelectedPreview(ChargeAcademicTerm.PREVIOUS));
+        setUnassignedItem.addActionListener(e -> setChargeTermForSelectedPreview(ChargeAcademicTerm.UNASSIGNED));
+
+        popupMenu.add(setCurrItem);
+        popupMenu.add(setPrevItem);
+        popupMenu.add(setUnassignedItem);
+        previewTable.setComponentPopupMenu(popupMenu);
+
         previewScrollPane = new JScrollPane(previewTable);
+        previewScrollPane.setBorder(BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1));
+        previewScrollPane.getViewport().setBackground(ThemeUtils.BG_SURFACE);
         panel.add(previewScrollPane, BorderLayout.CENTER);
 
         return panel;
     }
 
+    private void setAllEligibleTerms(ChargeAcademicTerm term) {
+        if (previewResult == null || previewResult.getItems() == null) return;
+        int count = 0;
+        for (ImportPreviewItem item : previewResult.getItems()) {
+            if (ChargeAcademicTerm.isTermEligibleCategory(item.getCitNight(), item.getPenalties())) {
+                item.setChargeAcademicTerm(term);
+                count++;
+            }
+        }
+        previewTableModel.setItems(previewResult.getItems());
+        JOptionPane.showMessageDialog(this,
+            String.format("Assigned %s to %d eligible record(s).", term.getLabel(), count),
+            "Term Assigned", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void setChargeTermForSelectedPreview(ChargeAcademicTerm term) {
+        int selectedRow = previewTable.getSelectedRow();
+        if (selectedRow < 0) return;
+        int modelRow = previewTable.convertRowIndexToModel(selectedRow);
+        if (previewResult != null && previewResult.getItems() != null && modelRow < previewResult.getItems().size()) {
+            ImportPreviewItem item = previewResult.getItems().get(modelRow);
+            item.setChargeAcademicTerm(term);
+            previewTableModel.fireTableRowsUpdated(modelRow, modelRow);
+        }
+    }
+
     private JPanel createBottomPanel() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        panel.setBackground(ThemeUtils.BG_CARD);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(1, 0, 0, 0, ThemeUtils.BORDER_COLOR),
+            BorderFactory.createEmptyBorder(10, 10, 10, 10)
+        ));
 
         // Progress bar and status
         JPanel progressPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        progressPanel.setBackground(ThemeUtils.BG_CARD);
         progressBar = new JProgressBar();
         progressBar.setPreferredSize(new Dimension(300, 20));
         progressBar.setStringPainted(true);
         progressBar.setVisible(false);
 
         statusLabel = new JLabel("Ready");
+        statusLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
         progressPanel.add(statusLabel);
         progressPanel.add(progressBar);
         panel.add(progressPanel, BorderLayout.WEST);
 
         // Buttons
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.setBackground(ThemeUtils.BG_CARD);
 
-        importButton = new JButton("Import");
+        importButton = new JButton("📥 Import");
         importButton.setEnabled(false);
+        ThemeUtils.styleButton(importButton, ThemeUtils.NEON_GREEN);
         importButton.addActionListener(e -> performImport());
         buttonPanel.add(importButton);
 
         cancelButton = new JButton("Close");
+        ThemeUtils.styleButton(cancelButton, ThemeUtils.TEXT_SECONDARY);
         cancelButton.addActionListener(e -> dispose());
         buttonPanel.add(cancelButton);
 
@@ -378,7 +480,7 @@ public class ImportDialog extends JDialog {
     private static class PreviewTableModel extends AbstractTableModel {
         private static final String[] COLUMN_NAMES = {
             "Row", "Receipt #", "Student Name", "Program", "Amount", "Status",
-            "Matched Student", "Details"
+            "Charge Term", "Matched Student", "Details"
         };
 
         private List<ImportPreviewItem> items;
@@ -404,6 +506,16 @@ public class ImportDialog extends JDialog {
         }
 
         @Override
+        public boolean isCellEditable(int rowIndex, int columnIndex) {
+            // Charge Term column is editable for rows with CIT Night or Penalty
+            if (columnIndex == 6 && items != null && rowIndex < items.size()) {
+                ImportPreviewItem item = items.get(rowIndex);
+                return ChargeAcademicTerm.isTermEligibleCategory(item.getCitNight(), item.getPenalties());
+            }
+            return false;
+        }
+
+        @Override
         public Object getValueAt(int rowIndex, int columnIndex) {
             if (items == null || rowIndex >= items.size()) return null;
             ImportPreviewItem item = items.get(rowIndex);
@@ -415,11 +527,26 @@ public class ImportDialog extends JDialog {
                 case 3: return item.getProgram() != null ? item.getProgram() : "";
                 case 4: return String.format("₱%,.2f", item.getTotalAmount());
                 case 5: return item.getStatus();
-                case 6: return item.getMatchedStudentName() != null ?
+                case 6: return item.getChargeAcademicTerm().getLabel();
+                case 7: return item.getMatchedStudentName() != null ?
                     item.getMatchedStudentCode() + " - " + item.getMatchedStudentName() :
                     (item.getProposedStudentCode() != null ? item.getProposedStudentCode() + " (new)" : "");
-                case 7: return getDetails(item);
+                case 8: return getDetails(item);
                 default: return null;
+            }
+        }
+
+        @Override
+        public void setValueAt(Object aValue, int rowIndex, int columnIndex) {
+            if (items == null || rowIndex >= items.size()) return;
+            ImportPreviewItem item = items.get(rowIndex);
+            if (columnIndex == 6) {
+                if (aValue instanceof ChargeAcademicTerm) {
+                    item.setChargeAcademicTerm((ChargeAcademicTerm) aValue);
+                } else if (aValue instanceof String) {
+                    item.setChargeAcademicTerm(ChargeAcademicTerm.fromCode((String) aValue));
+                }
+                fireTableCellUpdated(rowIndex, columnIndex);
             }
         }
 
@@ -444,6 +571,7 @@ public class ImportDialog extends JDialog {
         @Override
         public Class<?> getColumnClass(int columnIndex) {
             if (columnIndex == 0 || columnIndex == 1) return Integer.class;
+            if (columnIndex == 6) return String.class;
             return String.class;
         }
     }
@@ -453,11 +581,11 @@ public class ImportDialog extends JDialog {
     private static class StatusCellRenderer extends DefaultTableCellRenderer {
         private static final java.util.Map<String, Color> STATUS_COLORS = new java.util.HashMap<>();
         static {
-            STATUS_COLORS.put(ImportPreviewItem.STATUS_NEW, new Color(0, 150, 0));
-            STATUS_COLORS.put(ImportPreviewItem.STATUS_DUPLICATE, new Color(150, 150, 0));
-            STATUS_COLORS.put(ImportPreviewItem.STATUS_CONFLICT, new Color(200, 100, 0));
-            STATUS_COLORS.put(ImportPreviewItem.STATUS_AMBIGUOUS, new Color(200, 0, 0));
-            STATUS_COLORS.put(ImportPreviewItem.STATUS_ERROR, new Color(150, 0, 0));
+            STATUS_COLORS.put(ImportPreviewItem.STATUS_NEW, ThemeUtils.NEON_GREEN);
+            STATUS_COLORS.put(ImportPreviewItem.STATUS_DUPLICATE, ThemeUtils.NEON_AMBER);
+            STATUS_COLORS.put(ImportPreviewItem.STATUS_CONFLICT, new Color(255, 140, 0));
+            STATUS_COLORS.put(ImportPreviewItem.STATUS_AMBIGUOUS, ThemeUtils.NEON_ROSE);
+            STATUS_COLORS.put(ImportPreviewItem.STATUS_ERROR, ThemeUtils.NEON_ROSE);
         }
 
         @Override
@@ -467,11 +595,13 @@ public class ImportDialog extends JDialog {
 
             if (value != null) {
                 String status = value.toString();
-                Color color = STATUS_COLORS.getOrDefault(status, Color.BLACK);
+                Color color = STATUS_COLORS.getOrDefault(status, ThemeUtils.TEXT_SECONDARY);
                 if (!isSelected) {
                     c.setForeground(color);
                 }
                 setText(status);
+                setHorizontalAlignment(CENTER);
+                setFont(getFont().deriveFont(Font.BOLD, 11f));
             }
             return c;
         }

@@ -19,6 +19,7 @@ public class AuditService {
     public static final String ACTION_VOID = "VOID";
     public static final String ACTION_IMPORT = "IMPORT";
     public static final String ACTION_MERGE = "MERGE";
+    public static final String ACTION_UNDO_MERGE = "UNDO_MERGE";
     public static final String ACTION_DELETE = "DELETE"; // For audit trail only - never actually delete
 
     public static final String ENTITY_STUDENT = "STUDENT";
@@ -74,6 +75,18 @@ public class AuditService {
         logAudit(ACTION_VOID, ENTITY_PAYMENT, String.valueOf(payment.getReceiptNumber()),
             payment.toString(), payment.toString() + " [VOIDED]",
             "Payment voided: " + reason, user);
+    }
+
+    /**
+     * Log charge academic term change for a payment
+     */
+    public void logChargeTermChanged(Payment payment, ChargeAcademicTerm oldTerm,
+                                     ChargeAcademicTerm newTerm, String user, String reason) {
+        String oldVal = oldTerm != null ? oldTerm.getLabel() : "UNASSIGNED";
+        String newVal = newTerm != null ? newTerm.getLabel() : "UNASSIGNED";
+        logAudit(ACTION_UPDATE, ENTITY_PAYMENT, String.valueOf(payment.getReceiptNumber()),
+            "Charge Term: " + oldVal, "Charge Term: " + newVal,
+            "Charge academic term updated: " + reason, user);
     }
 
     /**
@@ -154,13 +167,14 @@ public class AuditService {
      * Format payment for audit log
      */
     private String formatPaymentForAudit(Payment p) {
-        return String.format("Receipt: %d, Program: %s, Intel: %s, T-Shirt: %s, Penalties: %s, CIT Night: %s, Received: %s, Remarks: %s, Date: %s, Total: ₱%,.2f",
+        return String.format("Receipt: %d, Program: %s, Intel: %s, T-Shirt: %s, Penalties: %s, CIT Night: %s, Charge Term: %s, Received: %s, Remarks: %s, Date: %s, Total: ₱%,.2f",
             p.getReceiptNumber(),
             p.getProgram() != null ? p.getProgram() : "-",
             p.getIntelFee() != null ? p.getIntelFee() : "-",
             p.getTshirtSizing() != null ? p.getTshirtSizing() : "-",
             p.getPenalties() != null ? p.getPenalties() : "-",
             p.getCitNight() != null ? p.getCitNight() : "-",
+            p.getChargeAcademicTerm() != null ? p.getChargeAcademicTerm().getLabel() : "-",
             p.getReceivedBy() != null ? p.getReceivedBy() : "-",
             p.getRemarks() != null ? p.getRemarks() : "-",
             p.getRemittanceDate() != null ? p.getRemittanceDate().toString() : "-",

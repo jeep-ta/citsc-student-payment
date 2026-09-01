@@ -18,8 +18,12 @@ public class AuditServiceTest {
     private static ImportService importService;
     private static String testFile;
 
+    private static final String TEST_DB_FILE = "test_audit_payment.db";
+
     @BeforeAll
     static void setup() throws Exception {
+        DatabaseManager.setCustomDatabaseUrl("jdbc:sqlite:" + TEST_DB_FILE);
+        DatabaseManager.resetInstance();
         db = DatabaseManager.getInstance();
         auditService = new AuditService();
         importService = new ImportService();
@@ -31,7 +35,11 @@ public class AuditServiceTest {
     @AfterAll
     static void cleanup() {
         new java.io.File(testFile).delete();
-        db.close();
+        DatabaseManager.resetInstance();
+        new java.io.File(TEST_DB_FILE).delete();
+        new java.io.File(TEST_DB_FILE + "-wal").delete();
+        new java.io.File(TEST_DB_FILE + "-shm").delete();
+        DatabaseManager.setCustomDatabaseUrl(null);
     }
 
     @BeforeEach
@@ -175,6 +183,63 @@ public class AuditServiceTest {
         boolean hasImportLog = logs.stream()
             .anyMatch(l -> "IMPORT".equals(l.get("action")) && "IMPORT_BATCH".equals(l.get("entity_type")));
         assertTrue(hasImportLog);
+    }
+
+    @Test
+    @Order(7)
+    void testVoidAndUnvoidPaymentWithAudit() throws Exception {
+        // Insert a payment
+        Student s = new Student("Void Test Student");
+        s.setStudentCode("STU-009999");
+        s.setProgram("BSCS");
+        db.insertStudent(s);
+
+        Payment p = new Payment(99999, "Void Test Student", "BSCS", 100.0, 0.0, 0.0, 0.0, "Admin", "Testing void");
+        p.setStudentId("STU-009999");
+        db.insertPayment(p);
+
+        // Void payment
+        boolean voided = db.voidPayment(99999, "Customer requested refund", "cashier1");
+        assertTrue(voided);
+
+        Payment retrieved = db.findPaymentByReceiptNumber(99999).orElseThrow();
+        assertEquals(Payment.STATUS_VOID, retrieved.getStatus());
+
+        // Check audit log
+        List<Map<String, Object>> voidLogs = auditService.getAuditLogsForEntity("PAYMENT", "99999");
+        assertFalse(voidLogs.isEmpty());
+        assertEquals("VOID", voidLogs.get(0).get("action"));
+        assertEquals("Customer requested refund", voidLogs.get(0).get("reason"));
+
+        // Unvoid payment
+        boolean unvoided = db.unvoidPayment(99999, "Payment reinstated after dispute resolution", "cashier1");
+        assertTrue(unvoided);
+
+        Payment reinstated = db.findPaymentByReceiptNumber(99999).orElseThrow();
+        assertEquals(Payment.STATUS_ACTIVE, reinstated.getStatus());
+    }
+
+    @Test
+    @Order(8)
+    void testGetDistinctPrograms() throws Exception {
+        Student s1 = new Student("Student One");
+        s1.setStudentCode("STU-000001");
+        s1.setProgram("BSCS");
+        db.insertStudent(s1);
+
+        Student s2 = new Student("Student Two");
+        s2.setStudentCode("STU-000002");
+        s2.setProgram("BSIT");
+        db.insertStudent(s2);
+
+        Payment p1 = new Payment(11111, "Student Three", "BSEM", 100.0, null, null, null, "Admin", "");
+        p1.setStudentId("STU-000001");
+        db.insertPayment(p1);
+
+        List<String> programs = db.getDistinctPrograms();
+        assertTrue(programs.contains("BSCS"));
+        assertTrue(programs.contains("BSIT"));
+        assertTrue(programs.contains("BSEM"));
     }
 
     private static String createTestExcelFile() throws Exception {

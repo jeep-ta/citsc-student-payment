@@ -34,63 +34,63 @@ public class ImportPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout(10, 10));
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        setBackground(Color.WHITE);
+        setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        setBackground(ThemeUtils.BG_DEEPEST);
 
-        // Title and import button
-        JPanel headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBackground(Color.WHITE);
+        // Header with gradient banner
+        JPanel headerPanel = new JPanel(new BorderLayout(0, 10));
+        headerPanel.setOpaque(false);
 
-        JLabel titleLabel = new JLabel("Imports");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 24f));
-        titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
-        headerPanel.add(titleLabel, BorderLayout.WEST);
+        JPanel titleBanner = ThemeUtils.createGradientPanel(new Color(15, 23, 42), new Color(10, 14, 26));
+        titleBanner.setLayout(new BorderLayout());
+        titleBanner.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 2, 0, ThemeUtils.NEON_CYAN),
+            BorderFactory.createEmptyBorder(12, 16, 12, 16)
+        ));
 
-        JButton importButton = new JButton("New Import");
+        JLabel titleLabel = new JLabel("📥 Import Manager");
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 22f));
+        titleLabel.setForeground(ThemeUtils.NEON_CYAN);
+        titleBanner.add(titleLabel, BorderLayout.WEST);
+
+        JButton importButton = new JButton("⚡ New Import");
         importButton.setFont(importButton.getFont().deriveFont(Font.BOLD, 12f));
-        importButton.setBackground(new Color(0, 120, 215));
-        importButton.setForeground(Color.WHITE);
-        importButton.setFocusPainted(false);
-        importButton.setBorder(BorderFactory.createEmptyBorder(8, 20, 8, 20));
+        ThemeUtils.styleButton(importButton, ThemeUtils.NEON_GREEN);
         importButton.addActionListener(e -> openImportDialog());
-        headerPanel.add(importButton, BorderLayout.EAST);
+        titleBanner.add(importButton, BorderLayout.EAST);
 
+        headerPanel.add(titleBanner, BorderLayout.NORTH);
         add(headerPanel, BorderLayout.NORTH);
 
         // Batch table
         batchTableModel = new BatchTableModel();
         batchTable = new JTable(batchTableModel);
         batchTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        batchTable.setRowHeight(32);
-        batchTable.setShowGrid(false);
-        batchTable.setIntercellSpacing(new Dimension(0, 1));
-        batchTable.getTableHeader().setReorderingAllowed(false);
-        batchTable.getTableHeader().setBackground(new Color(245, 245, 245));
-        batchTable.getTableHeader().setFont(batchTable.getTableHeader().getFont().deriveFont(Font.BOLD, 12f));
-        batchTable.setFont(batchTable.getFont().deriveFont(Font.PLAIN, 12f));
+        ThemeUtils.applyTableTheme(batchTable);
 
         // Column widths
-        batchTable.getColumnModel().getColumn(0).setPreferredWidth(120); // Batch Code
-        batchTable.getColumnModel().getColumn(1).setPreferredWidth(200); // File
-        batchTable.getColumnModel().getColumn(2).setPreferredWidth(130); // Imported At
-        batchTable.getColumnModel().getColumn(3).setPreferredWidth(100); // Remittance Date
-        batchTable.getColumnModel().getColumn(4).setPreferredWidth(80);  // Records
-        batchTable.getColumnModel().getColumn(5).setPreferredWidth(80);  // New
-        batchTable.getColumnModel().getColumn(6).setPreferredWidth(80);  // Duplicates
-        batchTable.getColumnModel().getColumn(7).setPreferredWidth(80);  // Conflicts
-        batchTable.getColumnModel().getColumn(8).setPreferredWidth(80);  // Errors
-        batchTable.getColumnModel().getColumn(9).setPreferredWidth(100); // Status
+        batchTable.getColumnModel().getColumn(0).setPreferredWidth(120);
+        batchTable.getColumnModel().getColumn(1).setPreferredWidth(200);
+        batchTable.getColumnModel().getColumn(2).setPreferredWidth(130);
+        batchTable.getColumnModel().getColumn(3).setPreferredWidth(100);
+        batchTable.getColumnModel().getColumn(4).setPreferredWidth(80);
+        batchTable.getColumnModel().getColumn(5).setPreferredWidth(80);
+        batchTable.getColumnModel().getColumn(6).setPreferredWidth(80);
+        batchTable.getColumnModel().getColumn(7).setPreferredWidth(80);
+        batchTable.getColumnModel().getColumn(8).setPreferredWidth(80);
+        batchTable.getColumnModel().getColumn(9).setPreferredWidth(100);
 
         // Custom renderer for status
         batchTable.getColumnModel().getColumn(9).setCellRenderer(new StatusCellRenderer());
 
         JScrollPane scrollPane = new JScrollPane(batchTable);
-        scrollPane.setBorder(BorderFactory.createLineBorder(new Color(220, 220, 220), 1));
-        scrollPane.getViewport().setBackground(Color.WHITE);
+        scrollPane.setBorder(BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1));
+        scrollPane.getViewport().setBackground(ThemeUtils.BG_SURFACE);
         add(scrollPane, BorderLayout.CENTER);
 
         // Status bar
-        statusLabel = new JLabel("Loading...");
+        statusLabel = new JLabel("Loading import batches...");
+        statusLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
         statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
         add(statusLabel, BorderLayout.SOUTH);
 
@@ -111,15 +111,8 @@ public class ImportPanel extends JPanel {
 
     private void openImportDialog() {
         JFrame frame = (JFrame) SwingUtilities.getWindowAncestor(this);
-        JDialog dialog = new JDialog(frame, "Import Payments", true);
-        dialog.setSize(900, 600);
-        dialog.setLocationRelativeTo(this);
-
-        // Use the existing ImportDialog
         com.payment.ImportDialog importDialog = new com.payment.ImportDialog(frame, importService);
         importDialog.setVisible(true);
-
-        // Refresh after import
         refreshData();
     }
 
@@ -196,20 +189,9 @@ public class ImportPanel extends JPanel {
             return batches.get(rowIndex);
         }
 
-        @Override
-        public int getRowCount() {
-            return batches.size();
-        }
-
-        @Override
-        public int getColumnCount() {
-            return COLUMNS.length;
-        }
-
-        @Override
-        public String getColumnName(int column) {
-            return COLUMNS[column];
-        }
+        @Override public int getRowCount() { return batches.size(); }
+        @Override public int getColumnCount() { return COLUMNS.length; }
+        @Override public String getColumnName(int column) { return COLUMNS[column]; }
 
         @Override
         public Object getValueAt(int rowIndex, int columnIndex) {
@@ -239,23 +221,20 @@ public class ImportPanel extends JPanel {
     private static class StatusCellRenderer extends DefaultTableCellRenderer {
         private static final java.util.Map<String, Color> STATUS_COLORS = new java.util.HashMap<>();
         static {
-            STATUS_COLORS.put("COMPLETED", new Color(0, 150, 0));
-            STATUS_COLORS.put("PENDING", new Color(200, 150, 0));
-            STATUS_COLORS.put("FAILED", new Color(200, 0, 0));
-            STATUS_COLORS.put("CANCELLED", new Color(150, 150, 150));
+            STATUS_COLORS.put("COMPLETED", ThemeUtils.NEON_GREEN);
+            STATUS_COLORS.put("PENDING", ThemeUtils.NEON_AMBER);
+            STATUS_COLORS.put("FAILED", ThemeUtils.NEON_ROSE);
+            STATUS_COLORS.put("CANCELLED", ThemeUtils.TEXT_MUTED);
         }
 
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value,
                 boolean isSelected, boolean hasFocus, int row, int column) {
             Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-
             if (value != null) {
                 String status = value.toString();
-                Color color = STATUS_COLORS.getOrDefault(status, Color.BLACK);
-                if (!isSelected) {
-                    c.setForeground(color);
-                }
+                Color color = STATUS_COLORS.getOrDefault(status, ThemeUtils.TEXT_SECONDARY);
+                if (!isSelected) c.setForeground(color);
                 setText(status);
                 setHorizontalAlignment(CENTER);
                 setFont(getFont().deriveFont(Font.BOLD, 11f));

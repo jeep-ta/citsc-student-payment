@@ -2,6 +2,7 @@ package com.payment.ui;
 
 import com.payment.Payment;
 import com.payment.Student;
+import com.payment.ChargeAcademicTerm;
 import com.payment.database.DatabaseManager;
 
 import javax.swing.*;
@@ -32,67 +33,200 @@ public class DataQualityPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout(10, 10));
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        setBackground(Color.WHITE);
+        setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        setBackground(ThemeUtils.BG_DEEPEST);
 
-        // Title
-        JLabel titleLabel = new JLabel("Data Quality");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 24f));
-        titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 15, 0));
-        add(titleLabel, BorderLayout.NORTH);
+        // Header
+        JPanel headerPanel = new JPanel(new BorderLayout(0, 10));
+        headerPanel.setOpaque(false);
 
-        // Toolbar
-        JPanel toolBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
-        toolBar.setBackground(Color.WHITE);
-        toolBar.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(220, 220, 220), 1),
-            BorderFactory.createEmptyBorder(10, 10, 10, 10)
+        // Title banner
+        JPanel titleBanner = ThemeUtils.createGradientPanel(new Color(15, 23, 42), new Color(10, 14, 26));
+        titleBanner.setLayout(new BorderLayout());
+        titleBanner.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 2, 0, ThemeUtils.NEON_AMBER),
+            BorderFactory.createEmptyBorder(12, 16, 12, 16)
         ));
 
-        JButton scanButton = new JButton("Scan for Issues");
+        JLabel titleLabel = new JLabel("🔍 Data Quality Inspector");
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 22f));
+        titleLabel.setForeground(ThemeUtils.NEON_AMBER);
+        titleBanner.add(titleLabel, BorderLayout.WEST);
+
+        JLabel subtitleLabel = new JLabel("Integrity Checks & Issue Detection");
+        subtitleLabel.setFont(subtitleLabel.getFont().deriveFont(Font.PLAIN, 12f));
+        subtitleLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        titleBanner.add(subtitleLabel, BorderLayout.EAST);
+
+        headerPanel.add(titleBanner, BorderLayout.NORTH);
+
+        // Toolbar
+        JPanel toolBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 6));
+        toolBar.setBackground(ThemeUtils.BG_CARD);
+        toolBar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1),
+            BorderFactory.createEmptyBorder(8, 10, 8, 10)
+        ));
+
+        JButton scanButton = new JButton("⚡ Scan for Issues");
+        ThemeUtils.styleButton(scanButton, ThemeUtils.NEON_AMBER);
         scanButton.addActionListener(e -> scanForIssues());
         toolBar.add(scanButton);
 
-        JButton exportButton = new JButton("Export Issues");
+        JButton exportButton = new JButton("📊 Export Issues");
+        ThemeUtils.styleButton(exportButton, ThemeUtils.NEON_GREEN);
         exportButton.addActionListener(e -> exportIssues());
         toolBar.add(exportButton);
 
-        add(toolBar, BorderLayout.NORTH);
+        JButton mergeButton = new JButton("🔀 Merge / Deduplicate...");
+        ThemeUtils.styleButton(mergeButton, ThemeUtils.NEON_CYAN);
+        mergeButton.addActionListener(e -> openMergeDialog());
+        toolBar.add(mergeButton);
+
+        headerPanel.add(toolBar, BorderLayout.CENTER);
+        add(headerPanel, BorderLayout.NORTH);
 
         // Issues table
         issuesTableModel = new IssuesTableModel();
         issuesTable = new JTable(issuesTableModel);
         issuesTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        issuesTable.setRowHeight(28);
-        issuesTable.setShowGrid(false);
-        issuesTable.setIntercellSpacing(new Dimension(0, 1));
-        issuesTable.getTableHeader().setReorderingAllowed(false);
-        issuesTable.getTableHeader().setBackground(new Color(245, 245, 245));
-        issuesTable.getTableHeader().setFont(issuesTable.getTableHeader().getFont().deriveFont(Font.BOLD, 12f));
-        issuesTable.setFont(issuesTable.getFont().deriveFont(Font.PLAIN, 12f));
+        ThemeUtils.applyTableTheme(issuesTable);
         issuesTable.setAutoCreateRowSorter(true);
 
         // Column widths
-        issuesTable.getColumnModel().getColumn(0).setPreferredWidth(80);   // Severity
-        issuesTable.getColumnModel().getColumn(1).setPreferredWidth(200);  // Issue Type
-        issuesTable.getColumnModel().getColumn(2).setPreferredWidth(120);  // Entity
-        issuesTable.getColumnModel().getColumn(3).setPreferredWidth(100);  // Entity ID
-        issuesTable.getColumnModel().getColumn(4).setPreferredWidth(400);  // Description
-        issuesTable.getColumnModel().getColumn(5).setPreferredWidth(100);  // Status
+        issuesTable.getColumnModel().getColumn(0).setPreferredWidth(80);
+        issuesTable.getColumnModel().getColumn(1).setPreferredWidth(200);
+        issuesTable.getColumnModel().getColumn(2).setPreferredWidth(120);
+        issuesTable.getColumnModel().getColumn(3).setPreferredWidth(100);
+        issuesTable.getColumnModel().getColumn(4).setPreferredWidth(400);
+        issuesTable.getColumnModel().getColumn(5).setPreferredWidth(100);
 
         // Custom renderers
         issuesTable.getColumnModel().getColumn(0).setCellRenderer(new SeverityCellRenderer());
         issuesTable.getColumnModel().getColumn(5).setCellRenderer(new StatusCellRenderer());
 
+        setupContextMenu();
+
         JScrollPane scrollPane = new JScrollPane(issuesTable);
-        scrollPane.setBorder(BorderFactory.createLineBorder(new Color(220, 220, 220), 1));
-        scrollPane.getViewport().setBackground(Color.WHITE);
+        scrollPane.setBorder(BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1));
+        scrollPane.getViewport().setBackground(ThemeUtils.BG_SURFACE);
         add(scrollPane, BorderLayout.CENTER);
 
         // Status bar
         statusLabel = new JLabel("Click 'Scan for Issues' to start");
+        statusLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
         statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
         add(statusLabel, BorderLayout.SOUTH);
+    }
+
+    private void setupContextMenu() {
+        JPopupMenu popupMenu = new JPopupMenu();
+        JMenuItem setCurrItem = new JMenuItem("Assign Current Term");
+        JMenuItem setPrevItem = new JMenuItem("Assign Previous Term");
+        JMenuItem viewItem = new JMenuItem("View Details in Panel");
+        JMenuItem copyIdItem = new JMenuItem("Copy Entity ID");
+
+        setCurrItem.addActionListener(e -> fixSelectedChargeTerm(ChargeAcademicTerm.CURRENT));
+        setPrevItem.addActionListener(e -> fixSelectedChargeTerm(ChargeAcademicTerm.PREVIOUS));
+        viewItem.addActionListener(e -> navigateToIssueEntity());
+        copyIdItem.addActionListener(e -> {
+            int row = issuesTable.getSelectedRow();
+            if (row >= 0) {
+                Object val = issuesTable.getValueAt(row, 3);
+                if (val != null) {
+                    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new java.awt.datatransfer.StringSelection(val.toString()), null);
+                }
+            }
+        });
+
+        JMenuItem mergeItem = new JMenuItem("🔀 Merge Student Records...");
+        mergeItem.addActionListener(e -> {
+            int row = issuesTable.getSelectedRow();
+            String preselected = null;
+            if (row >= 0) {
+                int modelRow = issuesTable.convertRowIndexToModel(row);
+                QualityIssue issue = issuesTableModel.getIssue(modelRow);
+                if (issue != null && "STUDENT".equalsIgnoreCase(issue.entity)) {
+                    preselected = issue.entityId;
+                }
+            }
+            openMergeDialog(preselected);
+        });
+
+        popupMenu.add(setCurrItem);
+        popupMenu.add(setPrevItem);
+        popupMenu.add(mergeItem);
+        popupMenu.addSeparator();
+        popupMenu.add(viewItem);
+        popupMenu.add(copyIdItem);
+
+        issuesTable.setComponentPopupMenu(popupMenu);
+        issuesTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    navigateToIssueEntity();
+                }
+            }
+            @Override
+            public void mousePressed(MouseEvent e) {
+                int row = issuesTable.rowAtPoint(e.getPoint());
+                if (row >= 0 && !issuesTable.isRowSelected(row)) {
+                    issuesTable.setRowSelectionInterval(row, row);
+                }
+                if (row >= 0) {
+                    int modelRow = issuesTable.convertRowIndexToModel(row);
+                    QualityIssue issue = issuesTableModel.getIssue(modelRow);
+                    boolean isTermIssue = issue != null && "Unassigned Charge Term".equals(issue.issueType);
+                    setCurrItem.setEnabled(isTermIssue);
+                    setPrevItem.setEnabled(isTermIssue);
+                }
+            }
+        });
+    }
+
+    private void fixSelectedChargeTerm(ChargeAcademicTerm term) {
+        int selectedRow = issuesTable.getSelectedRow();
+        if (selectedRow < 0) return;
+        int modelRow = issuesTable.convertRowIndexToModel(selectedRow);
+        QualityIssue issue = issuesTableModel.getIssue(modelRow);
+        if (issue == null || !"PAYMENT".equals(issue.entity)) return;
+
+        try {
+            int receiptNumber = Integer.parseInt(issue.entityId);
+            db.updatePaymentChargeTerm(receiptNumber, term, "Fixed via Data Quality Panel", "user");
+            JOptionPane.showMessageDialog(this, "Receipt #" + receiptNumber + " assigned to " + term.getLabel(), "Term Assigned", JOptionPane.INFORMATION_MESSAGE);
+            scanForIssues();
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Error assigning term: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void navigateToIssueEntity() {
+        int selectedRow = issuesTable.getSelectedRow();
+        if (selectedRow < 0) return;
+        int modelRow = issuesTable.convertRowIndexToModel(selectedRow);
+        QualityIssue issue = issuesTableModel.getIssue(modelRow);
+        if (issue == null) return;
+
+        Window window = SwingUtilities.getWindowAncestor(this);
+        if (window instanceof MainFrame mainFrame) {
+            if ("PAYMENT".equals(issue.entity)) {
+                mainFrame.showPaymentsForStudent(issue.entityId);
+            } else if ("STUDENT".equals(issue.entity)) {
+                mainFrame.navigateTo("Students");
+            }
+        }
+    }
+
+    private void openMergeDialog() {
+        openMergeDialog(null);
+    }
+
+    private void openMergeDialog(String preselectedSource) {
+        Window window = SwingUtilities.getWindowAncestor(this);
+        MergeStudentsDialog dialog = new MergeStudentsDialog(window, preselectedSource, null, this::scanForIssues);
+        dialog.setVisible(true);
     }
 
     public void scanForIssues() {
@@ -124,14 +258,13 @@ public class DataQualityPanel extends JPanel {
                     }
                 }
 
-                // 2. Check for receipt conflicts (same receipt, different amounts)
+                // 2. Check for receipt conflicts
                 List<Payment> payments = db.getAllPayments();
                 Map<Integer, List<Payment>> byReceipt = payments.stream()
                     .collect(Collectors.groupingBy(Payment::getReceiptNumber));
 
                 for (Map.Entry<Integer, List<Payment>> entry : byReceipt.entrySet()) {
                     if (entry.getValue().size() > 1) {
-                        // Check if they have different amounts
                         double firstAmount = entry.getValue().get(0).getTotalAmount();
                         boolean hasConflict = entry.getValue().stream()
                             .anyMatch(p -> Math.abs(p.getTotalAmount() - firstAmount) > 0.01);
@@ -164,131 +297,76 @@ public class DataQualityPanel extends JPanel {
                 // 3. Check for invalid payment records
                 for (Payment p : payments) {
                     if (p.getTotalAmount() < 0) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.ERROR,
-                            "Negative Total Amount",
-                            "PAYMENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.ERROR, "Negative Total Amount", "PAYMENT",
                             String.valueOf(p.getReceiptNumber()),
-                            String.format("Receipt %d has negative total: ₱%,.2f", p.getReceiptNumber(), p.getTotalAmount()),
-                            "OPEN"
-                        ));
+                            String.format("Receipt %d has negative total: ₱%,.2f", p.getReceiptNumber(), p.getTotalAmount()), "OPEN"));
                     }
-
                     if (p.getIntelFee() != null && p.getIntelFee() < 0) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.WARNING,
-                            "Negative Intel Fee",
-                            "PAYMENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Negative Intel Fee", "PAYMENT",
                             String.valueOf(p.getReceiptNumber()),
-                            String.format("Receipt %d has negative Intel Fee: ₱%,.2f", p.getReceiptNumber(), p.getIntelFee()),
-                            "OPEN"
-                        ));
+                            String.format("Receipt %d has negative Intel Fee: ₱%,.2f", p.getReceiptNumber(), p.getIntelFee()), "OPEN"));
                     }
-
                     if (p.getTshirtSizing() != null && p.getTshirtSizing() < 0) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.WARNING,
-                            "Negative T-Shirt Fee",
-                            "PAYMENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Negative T-Shirt Fee", "PAYMENT",
                             String.valueOf(p.getReceiptNumber()),
-                            String.format("Receipt %d has negative T-Shirt Fee: ₱%,.2f", p.getReceiptNumber(), p.getTshirtSizing()),
-                            "OPEN"
-                        ));
+                            String.format("Receipt %d has negative T-Shirt Fee: ₱%,.2f", p.getReceiptNumber(), p.getTshirtSizing()), "OPEN"));
                     }
-
                     if (p.getPenalties() != null && p.getPenalties() < 0) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.WARNING,
-                            "Negative Penalties",
-                            "PAYMENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Negative Penalties", "PAYMENT",
                             String.valueOf(p.getReceiptNumber()),
-                            String.format("Receipt %d has negative Penalties: ₱%,.2f", p.getReceiptNumber(), p.getPenalties()),
-                            "OPEN"
-                        ));
+                            String.format("Receipt %d has negative Penalties: ₱%,.2f", p.getReceiptNumber(), p.getPenalties()), "OPEN"));
                     }
-
                     if (p.getCitNight() != null && p.getCitNight() < 0) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.WARNING,
-                            "Negative CIT Night Fee",
-                            "PAYMENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Negative CIT Night Fee", "PAYMENT",
                             String.valueOf(p.getReceiptNumber()),
-                            String.format("Receipt %d has negative CIT Night Fee: ₱%,.2f", p.getReceiptNumber(), p.getCitNight()),
-                            "OPEN"
-                        ));
+                            String.format("Receipt %d has negative CIT Night Fee: ₱%,.2f", p.getReceiptNumber(), p.getCitNight()), "OPEN"));
                     }
-
-                    // Missing program
                     if (p.getProgram() == null || p.getProgram().trim().isEmpty()) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.WARNING,
-                            "Missing Program",
-                            "PAYMENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Missing Program", "PAYMENT",
                             String.valueOf(p.getReceiptNumber()),
-                            String.format("Receipt %d has no program assigned", p.getReceiptNumber()),
-                            "OPEN"
-                        ));
+                            String.format("Receipt %d has no program assigned", p.getReceiptNumber()), "OPEN"));
                     }
-
-                    // Missing received by
                     if (p.getReceivedBy() == null || p.getReceivedBy().trim().isEmpty()) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.INFO,
-                            "Missing Receiver",
-                            "PAYMENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.INFO, "Missing Receiver", "PAYMENT",
                             String.valueOf(p.getReceiptNumber()),
-                            String.format("Receipt %d has no receiver recorded", p.getReceiptNumber()),
-                            "OPEN"
-                        ));
+                            String.format("Receipt %d has no receiver recorded", p.getReceiptNumber()), "OPEN"));
                     }
-
-                    // Missing remittance date
                     if (p.getRemittanceDate() == null) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.INFO,
-                            "Missing Remittance Date",
-                            "PAYMENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.INFO, "Missing Remittance Date", "PAYMENT",
                             String.valueOf(p.getReceiptNumber()),
-                            String.format("Receipt %d has no remittance date", p.getReceiptNumber()),
-                            "OPEN"
-                        ));
+                            String.format("Receipt %d has no remittance date", p.getReceiptNumber()), "OPEN"));
+                    }
+                    if (ChargeAcademicTerm.isTermEligibleCategory(p.getCitNight(), p.getPenalties()) &&
+                        (p.getChargeAcademicTerm() == null || p.getChargeAcademicTerm() == ChargeAcademicTerm.UNASSIGNED)) {
+                        issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Unassigned Charge Term", "PAYMENT",
+                            String.valueOf(p.getReceiptNumber()),
+                            String.format("Receipt %d has CIT Night/Penalty amount but UNASSIGNED charge term", p.getReceiptNumber()), "OPEN"));
                     }
                 }
 
-                // 4. Check for students without payments
+                // 4. Students without payments
                 for (Student s : students) {
                     if (s.getPaymentCount() == 0) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.INFO,
-                            "Student Without Payments",
-                            "STUDENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.INFO, "Student Without Payments", "STUDENT",
                             s.getStudentCode(),
-                            String.format("Student %s (%s) has no payment records", s.getStudentCode(), s.getName()),
-                            "OPEN"
-                        ));
+                            String.format("Student %s (%s) has no payment records", s.getStudentCode(), s.getName()), "OPEN"));
                     }
                 }
 
-                // 5. Check for inconsistent program naming
+                // 5. Inconsistent program naming
                 Map<String, Long> programCounts = students.stream()
                     .filter(s -> s.getProgram() != null && !s.getProgram().isEmpty())
                     .collect(Collectors.groupingBy(Student::getProgram, Collectors.counting()));
 
                 for (String program : programCounts.keySet()) {
-                    // Check for similar programs (case insensitive)
                     String lower = program.toLowerCase();
                     long similarCount = programCounts.keySet().stream()
                         .filter(p -> p.toLowerCase().equals(lower) && !p.equals(program))
                         .count();
                     if (similarCount > 0) {
-                        issues.add(new QualityIssue(
-                            QualityIssue.Severity.WARNING,
-                            "Inconsistent Program Naming",
-                            "STUDENT",
+                        issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Inconsistent Program Naming", "STUDENT",
                             program,
-                            String.format("Program '%s' has %d similar variant(s) (case difference)", program, similarCount),
-                            "OPEN"
-                        ));
+                            String.format("Program '%s' has %d similar variant(s) (case difference)", program, similarCount), "OPEN"));
                     }
                 }
 
@@ -300,11 +378,9 @@ public class DataQualityPanel extends JPanel {
                 try {
                     List<QualityIssue> issues = get();
                     issuesTableModel.setIssues(issues);
-
                     int errors = (int) issues.stream().filter(i -> i.severity == QualityIssue.Severity.ERROR).count();
                     int warnings = (int) issues.stream().filter(i -> i.severity == QualityIssue.Severity.WARNING).count();
                     int info = (int) issues.stream().filter(i -> i.severity == QualityIssue.Severity.INFO).count();
-
                     statusLabel.setText(String.format("Scan complete: %d errors, %d warnings, %d info", errors, warnings, info));
                 } catch (Exception e) {
                     statusLabel.setText("Error scanning: " + e.getMessage());
@@ -382,20 +458,14 @@ public class DataQualityPanel extends JPanel {
             fireTableDataChanged();
         }
 
-        @Override
-        public int getRowCount() {
-            return issues.size();
+        public QualityIssue getIssue(int rowIndex) {
+            if (issues != null && rowIndex >= 0 && rowIndex < issues.size()) return issues.get(rowIndex);
+            return null;
         }
 
-        @Override
-        public int getColumnCount() {
-            return COLUMNS.length;
-        }
-
-        @Override
-        public String getColumnName(int column) {
-            return COLUMNS[column];
-        }
+        @Override public int getRowCount() { return issues.size(); }
+        @Override public int getColumnCount() { return COLUMNS.length; }
+        @Override public String getColumnName(int column) { return COLUMNS[column]; }
 
         @Override
         public Object getValueAt(int rowIndex, int columnIndex) {
@@ -411,10 +481,7 @@ public class DataQualityPanel extends JPanel {
             }
         }
 
-        @Override
-        public Class<?> getColumnClass(int columnIndex) {
-            return String.class;
-        }
+        @Override public Class<?> getColumnClass(int columnIndex) { return String.class; }
     }
 
     // --- Cell Renderers ---
@@ -422,22 +489,19 @@ public class DataQualityPanel extends JPanel {
     private static class SeverityCellRenderer extends DefaultTableCellRenderer {
         private static final java.util.Map<String, Color> SEVERITY_COLORS = new java.util.HashMap<>();
         static {
-            SEVERITY_COLORS.put("ERROR", new Color(200, 0, 0));
-            SEVERITY_COLORS.put("WARNING", new Color(200, 150, 0));
-            SEVERITY_COLORS.put("INFO", new Color(0, 100, 200));
+            SEVERITY_COLORS.put("ERROR", ThemeUtils.NEON_ROSE);
+            SEVERITY_COLORS.put("WARNING", ThemeUtils.NEON_AMBER);
+            SEVERITY_COLORS.put("INFO", ThemeUtils.NEON_CYAN);
         }
 
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value,
                 boolean isSelected, boolean hasFocus, int row, int column) {
             Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-
             if (value != null) {
                 String severity = value.toString();
-                Color color = SEVERITY_COLORS.getOrDefault(severity, Color.BLACK);
-                if (!isSelected) {
-                    c.setForeground(color);
-                }
+                Color color = SEVERITY_COLORS.getOrDefault(severity, ThemeUtils.TEXT_SECONDARY);
+                if (!isSelected) c.setForeground(color);
                 setText(severity);
                 setHorizontalAlignment(CENTER);
                 setFont(getFont().deriveFont(Font.BOLD, 11f));
@@ -451,13 +515,10 @@ public class DataQualityPanel extends JPanel {
         public Component getTableCellRendererComponent(JTable table, Object value,
                 boolean isSelected, boolean hasFocus, int row, int column) {
             Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-
             if (value != null) {
                 setText(value.toString());
                 setHorizontalAlignment(CENTER);
-                if (!isSelected) {
-                    c.setForeground(new Color(0, 120, 215));
-                }
+                if (!isSelected) c.setForeground(ThemeUtils.NEON_CYAN);
             }
             return c;
         }

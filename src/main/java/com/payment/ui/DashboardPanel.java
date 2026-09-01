@@ -46,20 +46,34 @@ public class DashboardPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout(10, 10));
-        setBorder(new EmptyBorder(15, 15, 15, 15));
-        setBackground(Color.WHITE);
+        setBorder(new EmptyBorder(12, 12, 12, 12));
+        setBackground(ThemeUtils.BG_DEEPEST);
 
-        // Title
-        JLabel titleLabel = new JLabel("Dashboard");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 24f));
-        titleLabel.setBorder(new EmptyBorder(0, 0, 15, 0));
-        add(titleLabel, BorderLayout.NORTH);
+        // Title with futuristic gradient banner
+        JPanel titleBanner = ThemeUtils.createGradientPanel(new Color(15, 23, 42), new Color(10, 14, 26));
+        titleBanner.setLayout(new BorderLayout());
+        titleBanner.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 2, 0, ThemeUtils.NEON_CYAN),
+            BorderFactory.createEmptyBorder(12, 16, 12, 16)
+        ));
+
+        JLabel titleLabel = new JLabel("📊 Payment System Intelligence Dashboard");
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 22f));
+        titleLabel.setForeground(ThemeUtils.NEON_CYAN);
+        titleBanner.add(titleLabel, BorderLayout.WEST);
+
+        JLabel subtitleLabel = new JLabel("Live Database Analytics");
+        subtitleLabel.setFont(subtitleLabel.getFont().deriveFont(Font.PLAIN, 12f));
+        subtitleLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        titleBanner.add(subtitleLabel, BorderLayout.EAST);
+
+        add(titleBanner, BorderLayout.NORTH);
 
         // Main content area with scroll
         JPanel contentPanel = new JPanel();
         contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
-        contentPanel.setBackground(Color.WHITE);
-        contentPanel.setBorder(new EmptyBorder(0, 0, 10, 0));
+        contentPanel.setOpaque(false);
+        contentPanel.setBorder(new EmptyBorder(10, 0, 10, 0));
 
         // Summary cards row
         JPanel summaryPanel = createSummaryCards();
@@ -73,50 +87,39 @@ public class DashboardPanel extends JPanel {
 
         JScrollPane scrollPane = new JScrollPane(contentPanel);
         scrollPane.setBorder(null);
+        scrollPane.getViewport().setBackground(ThemeUtils.BG_DEEPEST);
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
         add(scrollPane, BorderLayout.CENTER);
     }
 
     private JPanel createSummaryCards() {
         JPanel panel = new JPanel(new GridLayout(1, 4, 15, 15));
-        panel.setBackground(Color.WHITE);
+        panel.setOpaque(false);
         panel.setBorder(new EmptyBorder(0, 0, 0, 0));
 
-        panel.add(createSummaryCard("Students", "0", new Color(0, 120, 215), "Total registered students", l -> studentCountLabel = l));
-        panel.add(createSummaryCard("Payments", "0", new Color(0, 150, 0), "Total payment records", l -> paymentCountLabel = l));
-        panel.add(createSummaryCard("Total Collected", "₱0.00", new Color(0, 100, 0), "Sum of all payments", l -> totalCollectedLabel = l));
-        panel.add(createSummaryCard("Import Batches", "0", new Color(150, 0, 150), "Completed imports", l -> batchCountLabel = l));
+        panel.add(createSummaryCard("Students", "0", ThemeUtils.NEON_CYAN, "Total registered students", l -> studentCountLabel = l));
+        panel.add(createSummaryCard("Payments", "0", ThemeUtils.NEON_GREEN, "Total payment records", l -> paymentCountLabel = l));
+        panel.add(createSummaryCard("Total Collected", "₱0.00", ThemeUtils.NEON_AMBER, "Sum of all payments", l -> totalCollectedLabel = l));
+        panel.add(createSummaryCard("Import Batches", "0", ThemeUtils.NEON_PURPLE, "Completed imports", l -> batchCountLabel = l));
 
         return panel;
     }
 
     private JPanel createSummaryCard(String title, String value, Color accentColor, String subtitle, java.util.function.Consumer<JLabel> valueLabelConsumer) {
-        JPanel card = new JPanel();
+        JPanel card = ThemeUtils.createFuturisticCard(accentColor);
         card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-        card.setBackground(Color.WHITE);
-        card.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(220, 220, 220), 1),
-            new EmptyBorder(15, 20, 15, 20)
-        ));
-
-        // Accent bar at top
-        JPanel accentBar = new JPanel();
-        accentBar.setBackground(accentColor);
-        accentBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 4));
-        accentBar.setPreferredSize(new Dimension(Integer.MAX_VALUE, 4));
-        card.add(accentBar);
-        card.add(Box.createVerticalStrut(10));
+        card.setBorder(new EmptyBorder(15, 20, 15, 20));
 
         JLabel titleLabel = new JLabel(title);
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.PLAIN, 13f));
-        titleLabel.setForeground(new Color(100, 100, 100));
+        titleLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
         titleLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         card.add(titleLabel);
         card.add(Box.createVerticalStrut(5));
 
         JLabel valueLabel = new JLabel(value);
-        valueLabel.setFont(valueLabel.getFont().deriveFont(Font.BOLD, 28f));
-        valueLabel.setForeground(Color.BLACK);
+        valueLabel.setFont(valueLabel.getFont().deriveFont(Font.BOLD, 26f));
+        valueLabel.setForeground(ThemeUtils.TEXT_PRIMARY);
         valueLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         card.add(valueLabel);
 
@@ -128,7 +131,7 @@ public class DashboardPanel extends JPanel {
 
         JLabel subtitleLabel = new JLabel(subtitle);
         subtitleLabel.setFont(subtitleLabel.getFont().deriveFont(Font.PLAIN, 11f));
-        subtitleLabel.setForeground(new Color(150, 150, 150));
+        subtitleLabel.setForeground(ThemeUtils.TEXT_MUTED);
         subtitleLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         card.add(subtitleLabel);
 
@@ -137,15 +140,15 @@ public class DashboardPanel extends JPanel {
 
     private JPanel createActivitySections() {
         JPanel panel = new JPanel(new GridLayout(1, 2, 15, 15));
-        panel.setBackground(Color.WHITE);
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 300));
+        panel.setOpaque(false);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 320));
 
         // Recent Imports
         JPanel importsPanel = createSectionPanel("Recent Import Batches", createRecentImportsTable());
         panel.add(importsPanel);
 
         // Recent Audit Activity
-        JPanel auditPanel = createSectionPanel("Recent Activity", createRecentAuditTable());
+        JPanel auditPanel = createSectionPanel("Recent System Activity", createRecentAuditTable());
         panel.add(auditPanel);
 
         return panel;
@@ -153,15 +156,16 @@ public class DashboardPanel extends JPanel {
 
     private JPanel createSectionPanel(String title, JComponent content) {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(ThemeUtils.BG_CARD);
         panel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(220, 220, 220), 1),
+            BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1),
             new EmptyBorder(0, 0, 0, 0)
         ));
 
         JLabel titleLabel = new JLabel(title);
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 14f));
-        titleLabel.setBorder(new EmptyBorder(15, 15, 5, 15));
+        titleLabel.setForeground(ThemeUtils.NEON_CYAN);
+        titleLabel.setBorder(new EmptyBorder(14, 15, 8, 15));
         panel.add(titleLabel, BorderLayout.NORTH);
 
         content.setBorder(new EmptyBorder(0, 10, 10, 10));
@@ -173,52 +177,44 @@ public class DashboardPanel extends JPanel {
     private JScrollPane createRecentImportsTable() {
         recentImportsModel = new RecentImportsTableModel();
         recentImportsTable = new JTable(recentImportsModel);
-        recentImportsTable.setRowHeight(28);
-        recentImportsTable.setShowGrid(false);
-        recentImportsTable.setIntercellSpacing(new Dimension(0, 1));
-        recentImportsTable.getTableHeader().setReorderingAllowed(false);
-        recentImportsTable.getTableHeader().setBackground(new Color(245, 245, 245));
-        recentImportsTable.getTableHeader().setFont(recentImportsTable.getTableHeader().getFont().deriveFont(Font.BOLD, 12f));
-        recentImportsTable.setFont(recentImportsTable.getFont().deriveFont(Font.PLAIN, 12f));
+        ThemeUtils.applyTableTheme(recentImportsTable);
 
         recentImportsTable.getColumnModel().getColumn(0).setPreferredWidth(100);
         recentImportsTable.getColumnModel().getColumn(1).setPreferredWidth(150);
         recentImportsTable.getColumnModel().getColumn(2).setPreferredWidth(80);
-        recentImportsTable.getColumnModel().getColumn(3).setPreferredWidth(80);
-        recentImportsTable.getColumnModel().getColumn(4).setPreferredWidth(80);
-        recentImportsTable.getColumnModel().getColumn(5).setPreferredWidth(80);
-        recentImportsTable.getColumnModel().getColumn(6).setPreferredWidth(80);
+        recentImportsTable.getColumnModel().getColumn(3).setPreferredWidth(60);
+
+        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
+        centerRenderer.setHorizontalAlignment(SwingConstants.CENTER);
+        recentImportsTable.getColumnModel().getColumn(0).setCellRenderer(centerRenderer);
+        recentImportsTable.getColumnModel().getColumn(2).setCellRenderer(centerRenderer);
+        recentImportsTable.getColumnModel().getColumn(3).setCellRenderer(centerRenderer);
 
         JScrollPane scrollPane = new JScrollPane(recentImportsTable);
-        scrollPane.setBorder(null);
-        scrollPane.getViewport().setBackground(Color.WHITE);
-        scrollPane.setPreferredSize(new Dimension(400, 250));
+        scrollPane.setBorder(BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1));
+        scrollPane.getViewport().setBackground(ThemeUtils.BG_SURFACE);
         return scrollPane;
     }
 
     private JScrollPane createRecentAuditTable() {
         AuditTableModel auditModel = new AuditTableModel();
-        JTable auditTable = new JTable(auditModel);
-        auditTable.setRowHeight(28);
-        auditTable.setShowGrid(false);
-        auditTable.setIntercellSpacing(new Dimension(0, 1));
-        auditTable.getTableHeader().setReorderingAllowed(false);
-        auditTable.getTableHeader().setBackground(new Color(245, 245, 245));
-        auditTable.getTableHeader().setFont(auditTable.getTableHeader().getFont().deriveFont(Font.BOLD, 12f));
-        auditTable.setFont(auditTable.getFont().deriveFont(Font.PLAIN, 12f));
+        JTable recentAuditTable = new JTable(auditModel);
+        ThemeUtils.applyTableTheme(recentAuditTable);
 
-        auditTable.getColumnModel().getColumn(0).setPreferredWidth(140);
-        auditTable.getColumnModel().getColumn(1).setPreferredWidth(70);
-        auditTable.getColumnModel().getColumn(2).setPreferredWidth(90);
-        auditTable.getColumnModel().getColumn(3).setPreferredWidth(180);
+        recentAuditTable.getColumnModel().getColumn(0).setPreferredWidth(120);
+        recentAuditTable.getColumnModel().getColumn(1).setPreferredWidth(70);
+        recentAuditTable.getColumnModel().getColumn(2).setPreferredWidth(150);
+        recentAuditTable.getColumnModel().getColumn(3).setPreferredWidth(70);
 
-        // Custom renderer for action column
-        auditTable.getColumnModel().getColumn(1).setCellRenderer(new ActionCellRenderer());
+        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
+        centerRenderer.setHorizontalAlignment(SwingConstants.CENTER);
+        recentAuditTable.getColumnModel().getColumn(0).setCellRenderer(centerRenderer);
+        recentAuditTable.getColumnModel().getColumn(1).setCellRenderer(centerRenderer);
+        recentAuditTable.getColumnModel().getColumn(3).setCellRenderer(centerRenderer);
 
-        JScrollPane scrollPane = new JScrollPane(auditTable);
-        scrollPane.setBorder(null);
-        scrollPane.getViewport().setBackground(Color.WHITE);
-        scrollPane.setPreferredSize(new Dimension(400, 250));
+        JScrollPane scrollPane = new JScrollPane(recentAuditTable);
+        scrollPane.setBorder(BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1));
+        scrollPane.getViewport().setBackground(ThemeUtils.BG_SURFACE);
 
         // Load audit data
         SwingWorker<List<Map<String, Object>>, Void> worker = new SwingWorker<>() {

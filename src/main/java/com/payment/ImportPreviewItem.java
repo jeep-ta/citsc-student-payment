@@ -27,6 +27,7 @@ public class ImportPreviewItem {
     private String receivedBy;
     private String remarks;
     private LocalDate remittanceDate;
+    private ChargeAcademicTerm chargeAcademicTerm; // Academic term for CIT Night/Penalty charges
 
     // Match results
     private String status;              // NEW, DUPLICATE, CONFLICT, AMBIGUOUS, ERROR
@@ -41,6 +42,7 @@ public class ImportPreviewItem {
 
     public ImportPreviewItem() {
         this.status = STATUS_NEW;
+        this.chargeAcademicTerm = ChargeAcademicTerm.UNASSIGNED;
     }
 
     public ImportPreviewItem(int rowNumber, int receiptNumber, String studentName, String program,
@@ -79,6 +81,7 @@ public class ImportPreviewItem {
     public Payment getConflictingPayment() { return conflictingPayment; }
     public String getErrorMessage() { return errorMessage; }
     public String getProposedStudentCode() { return proposedStudentCode; }
+    public ChargeAcademicTerm getChargeAcademicTerm() { return chargeAcademicTerm != null ? chargeAcademicTerm : ChargeAcademicTerm.UNASSIGNED; }
 
     // --- Setters ---
     public void setRowNumber(int rowNumber) { this.rowNumber = rowNumber; }
@@ -99,6 +102,7 @@ public class ImportPreviewItem {
     public void setConflictingPayment(Payment conflictingPayment) { this.conflictingPayment = conflictingPayment; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
     public void setProposedStudentCode(String proposedStudentCode) { this.proposedStudentCode = proposedStudentCode; }
+    public void setChargeAcademicTerm(ChargeAcademicTerm chargeAcademicTerm) { this.chargeAcademicTerm = chargeAcademicTerm != null ? chargeAcademicTerm : ChargeAcademicTerm.UNASSIGNED; }
 
     // --- Helpers ---
     public boolean isNew() { return STATUS_NEW.equals(status); }

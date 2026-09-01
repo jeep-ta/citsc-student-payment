@@ -1,0 +1,8 @@
+com\payment\StudentCodeGeneratorTest.class
+com\payment\StudentMergeAndTermTest.class
+com\payment\ImportServiceTest.class
+com\payment\ImportBatchTest.class
+com\payment\PaymentTest.class
+com\payment\AuditServiceTest.class
+com\payment\NameNormalizerTest.class
+com\payment\StudentTest.class

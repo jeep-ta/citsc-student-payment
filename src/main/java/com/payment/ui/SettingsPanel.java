@@ -1,5 +1,6 @@
 package com.payment.ui;
 
+import com.payment.ChargeAcademicTerm;
 import com.payment.Payment;
 import com.payment.Student;
 import com.payment.database.DatabaseManager;
@@ -15,12 +16,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Settings Panel - Application configuration and maintenance.
+ * Settings Panel - Application configuration, academic period declaration, and maintenance.
+ * Styled with the cyber-dark theme for visual consistency.
  */
 public class SettingsPanel extends JPanel {
 
     private final DatabaseManager db;
 
+    // Academic Period Declaration
+    private JComboBox<String> currentAyCombo;
+    private JComboBox<String> currentTermCombo;
+    private JCheckBox autoAssignTermCheck;
+    private JLabel currentPeriodStatusLabel;
+
+    // General & Import Settings
     private JCheckBox autoLoadDefaultFile;
     private JTextField defaultFilePathField;
     private JSpinner maxPreviewRowsSpinner;
@@ -39,72 +48,200 @@ public class SettingsPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout(10, 10));
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        setBackground(Color.WHITE);
+        setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        setBackground(ThemeUtils.BG_DEEPEST);
 
-        // Title
-        JLabel titleLabel = new JLabel("Settings");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 24f));
-        titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 15, 0));
-        add(titleLabel, BorderLayout.NORTH);
+        // Header with futuristic gradient banner
+        JPanel headerPanel = new JPanel(new BorderLayout(0, 10));
+        headerPanel.setOpaque(false);
+
+        JPanel titleBanner = ThemeUtils.createGradientPanel(new Color(15, 23, 42), new Color(10, 14, 26));
+        titleBanner.setLayout(new BorderLayout());
+        titleBanner.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 2, 0, ThemeUtils.NEON_CYAN),
+            BorderFactory.createEmptyBorder(12, 16, 12, 16)
+        ));
+
+        JLabel titleLabel = new JLabel("⚙️ Application Settings & Academic Declaration");
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 22f));
+        titleLabel.setForeground(ThemeUtils.NEON_CYAN);
+        titleBanner.add(titleLabel, BorderLayout.WEST);
+
+        JLabel subtitleLabel = new JLabel("Active Period, Term Configuration & Maintenance");
+        subtitleLabel.setFont(subtitleLabel.getFont().deriveFont(Font.PLAIN, 12f));
+        subtitleLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        titleBanner.add(subtitleLabel, BorderLayout.EAST);
+
+        headerPanel.add(titleBanner, BorderLayout.NORTH);
+        add(headerPanel, BorderLayout.NORTH);
 
         // Scrollable content
         JPanel contentPanel = new JPanel();
         contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
-        contentPanel.setBackground(Color.WHITE);
+        contentPanel.setBackground(ThemeUtils.BG_DEEPEST);
 
-        // General Settings
-        contentPanel.add(createSection("General Settings", createGeneralSettings()));
-        contentPanel.add(Box.createVerticalStrut(20));
+        // 1. Academic Period & Current Term Declaration (Top Priority)
+        contentPanel.add(createSection("🎓 Academic Period & Current Term Declaration", ThemeUtils.NEON_CYAN, createAcademicPeriodSettings()));
+        contentPanel.add(Box.createVerticalStrut(16));
 
-        // Import Settings
-        contentPanel.add(createSection("Import Settings", createImportSettings()));
-        contentPanel.add(Box.createVerticalStrut(20));
+        // 2. General Settings
+        contentPanel.add(createSection("General Settings", ThemeUtils.NEON_PURPLE, createGeneralSettings()));
+        contentPanel.add(Box.createVerticalStrut(16));
 
-        // Database Info
-        contentPanel.add(createSection("Database Information", createDatabaseInfo()));
-        contentPanel.add(Box.createVerticalStrut(20));
+        // 3. Import Settings
+        contentPanel.add(createSection("Import Settings", ThemeUtils.NEON_GREEN, createImportSettings()));
+        contentPanel.add(Box.createVerticalStrut(16));
 
-        // Maintenance
-        contentPanel.add(createSection("Maintenance", createMaintenancePanel()));
-        contentPanel.add(Box.createVerticalStrut(20));
+        // 4. Database Info
+        contentPanel.add(createSection("Database Information", ThemeUtils.NEON_AMBER, createDatabaseInfo()));
+        contentPanel.add(Box.createVerticalStrut(16));
 
-        // About
-        contentPanel.add(createSection("About", createAboutPanel()));
+        // 5. Maintenance
+        contentPanel.add(createSection("Maintenance", ThemeUtils.NEON_ROSE, createMaintenancePanel()));
+        contentPanel.add(Box.createVerticalStrut(16));
+
+        // 6. About
+        contentPanel.add(createSection("About", ThemeUtils.NEON_BLUE, createAboutPanel()));
 
         JScrollPane scrollPane = new JScrollPane(contentPanel);
         scrollPane.setBorder(null);
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        scrollPane.getViewport().setBackground(Color.WHITE);
+        scrollPane.getViewport().setBackground(ThemeUtils.BG_DEEPEST);
         add(scrollPane, BorderLayout.CENTER);
     }
 
-    private JPanel createSection(String title, JComponent content) {
+    private JPanel createSection(String title, Color accentColor, JComponent content) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(ThemeUtils.BG_CARD);
         panel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(220, 220, 220), 1),
-            BorderFactory.createEmptyBorder(15, 15, 15, 15)
+            BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1),
+            BorderFactory.createEmptyBorder(0, 0, 15, 0)
         ));
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
 
+        // Section header with accent glow line
+        JPanel headerBar = new JPanel(new BorderLayout());
+        headerBar.setBackground(ThemeUtils.BG_CARD);
+        headerBar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(2, 0, 0, 0, accentColor),
+            BorderFactory.createEmptyBorder(12, 15, 8, 15)
+        ));
+
         JLabel titleLabel = new JLabel(title);
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 14f));
+        titleLabel.setForeground(accentColor);
         titleLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        panel.add(titleLabel);
-        panel.add(Box.createVerticalStrut(15));
+        headerBar.add(titleLabel, BorderLayout.WEST);
 
+        panel.add(headerBar);
+
+        JPanel contentWrapper = new JPanel(new BorderLayout());
+        contentWrapper.setBackground(ThemeUtils.BG_CARD);
+        contentWrapper.setBorder(BorderFactory.createEmptyBorder(5, 15, 0, 15));
         content.setAlignmentX(Component.LEFT_ALIGNMENT);
-        panel.add(content);
+        contentWrapper.add(content, BorderLayout.CENTER);
+        panel.add(contentWrapper);
 
         return panel;
     }
 
+    private JPanel createAcademicPeriodSettings() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBackground(ThemeUtils.BG_CARD);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(8, 0, 8, 10);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        // Current Academic Year
+        gbc.gridx = 0; gbc.gridy = 0;
+        JLabel ayLabel = new JLabel("Current Academic Year:");
+        ayLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(ayLabel, gbc);
+
+        gbc.gridx = 1; gbc.weightx = 1.0;
+        currentAyCombo = new JComboBox<>(new String[]{"2026-2027", "2025-2026", "2024-2025", "2027-2028"});
+        currentAyCombo.setEditable(true);
+        currentAyCombo.setPreferredSize(new Dimension(200, 28));
+        panel.add(currentAyCombo, gbc);
+
+        // Current Active Term
+        gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0;
+        JLabel termLabel = new JLabel("Active Academic Term:");
+        termLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(termLabel, gbc);
+
+        gbc.gridx = 1; gbc.weightx = 1.0;
+        currentTermCombo = new JComboBox<>(new String[]{
+            ChargeAcademicTerm.FIRST_SEM.getLabel(),
+            ChargeAcademicTerm.SECOND_SEM.getLabel(),
+            ChargeAcademicTerm.SUMMER.getLabel(),
+            ChargeAcademicTerm.CURRENT.getLabel(),
+            ChargeAcademicTerm.PREVIOUS.getLabel()
+        });
+        currentTermCombo.setPreferredSize(new Dimension(200, 28));
+        panel.add(currentTermCombo, gbc);
+
+        // Auto-assign Checkbox
+        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2;
+        autoAssignTermCheck = new JCheckBox("Automatically assign new & imported payments to this academic term & year");
+        autoAssignTermCheck.setBackground(ThemeUtils.BG_CARD);
+        autoAssignTermCheck.setForeground(ThemeUtils.TEXT_PRIMARY);
+        autoAssignTermCheck.setFont(autoAssignTermCheck.getFont().deriveFont(Font.BOLD, 12f));
+        panel.add(autoAssignTermCheck, gbc);
+
+        // Status / hint label
+        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 2;
+        currentPeriodStatusLabel = new JLabel("Declared active period will be automatically populated on new receipts & imports.");
+        currentPeriodStatusLabel.setFont(currentPeriodStatusLabel.getFont().deriveFont(Font.PLAIN, 11f));
+        currentPeriodStatusLabel.setForeground(ThemeUtils.TEXT_MUTED);
+        panel.add(currentPeriodStatusLabel, gbc);
+
+        // Save Button
+        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 2;
+        JButton savePeriodBtn = new JButton("💾 Save Academic Declaration");
+        ThemeUtils.styleButton(savePeriodBtn, ThemeUtils.NEON_CYAN);
+        savePeriodBtn.addActionListener(e -> saveAcademicPeriodSettings());
+        panel.add(savePeriodBtn, gbc);
+
+        return panel;
+    }
+
+    private void saveAcademicPeriodSettings() {
+        String ay = (String) currentAyCombo.getSelectedItem();
+        String termStr = (String) currentTermCombo.getSelectedItem();
+        boolean autoAssign = autoAssignTermCheck.isSelected();
+
+        if (ay == null || ay.trim().isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please specify an academic year.", "Validation Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        try {
+            db.setCurrentAcademicYear(ay.trim());
+            db.setCurrentAcademicTerm(ChargeAcademicTerm.fromCode(termStr));
+            db.setAutoAssignCurrentTerm(autoAssign);
+
+            currentPeriodStatusLabel.setText(String.format("✅ Active: %s (%s) • Auto-assign %s",
+                ay.trim(), termStr, autoAssign ? "ENABLED" : "DISABLED"));
+            currentPeriodStatusLabel.setForeground(ThemeUtils.NEON_GREEN);
+
+            JOptionPane.showMessageDialog(this,
+                String.format("Academic Period Updated:\n\n• Academic Year: %s\n• Active Term: %s\n• Auto-Assign: %s\n\nNew payments & imports will use this period.",
+                    ay.trim(), termStr, autoAssign ? "YES" : "NO"),
+                "Academic Period Declared", JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Error saving academic period: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
+        }
+    }
+
     private JPanel createGeneralSettings() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(ThemeUtils.BG_CARD);
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(8, 0, 8, 10);
@@ -113,7 +250,9 @@ public class SettingsPanel extends JPanel {
 
         // Theme
         gbc.gridx = 0; gbc.gridy = 0;
-        panel.add(new JLabel("UI Theme:"), gbc);
+        JLabel themeLabel = new JLabel("UI Theme:");
+        themeLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(themeLabel, gbc);
         gbc.gridx = 1; gbc.weightx = 1.0;
         themeCombo = new JComboBox<>(new String[]{"System Default", "Light", "Dark"});
         themeCombo.setPreferredSize(new Dimension(200, 28));
@@ -124,7 +263,7 @@ public class SettingsPanel extends JPanel {
 
     private JPanel createImportSettings() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(ThemeUtils.BG_CARD);
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(8, 0, 8, 10);
@@ -133,7 +272,9 @@ public class SettingsPanel extends JPanel {
 
         // Default file
         gbc.gridx = 0; gbc.gridy = 0;
-        panel.add(new JLabel("Default Excel File:"), gbc);
+        JLabel fileLabel = new JLabel("Default Excel File:");
+        fileLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(fileLabel, gbc);
         gbc.gridx = 1; gbc.weightx = 1.0;
         defaultFilePathField = new JTextField(30);
         defaultFilePathField.setEditable(false);
@@ -141,19 +282,26 @@ public class SettingsPanel extends JPanel {
 
         gbc.gridx = 2; gbc.weightx = 0;
         JButton browseButton = new JButton("Browse...");
+        ThemeUtils.styleButton(browseButton, ThemeUtils.NEON_CYAN);
         browseButton.addActionListener(e -> browseDefaultFile());
         panel.add(browseButton, gbc);
 
         // Auto load
         gbc.gridx = 0; gbc.gridy = 1;
-        panel.add(new JLabel("Auto-load on Startup:"), gbc);
+        JLabel autoLoadLabel = new JLabel("Auto-load on Startup:");
+        autoLoadLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(autoLoadLabel, gbc);
         gbc.gridx = 1;
         autoLoadDefaultFile = new JCheckBox("Load default file automatically");
+        autoLoadDefaultFile.setBackground(ThemeUtils.BG_CARD);
+        autoLoadDefaultFile.setForeground(ThemeUtils.TEXT_PRIMARY);
         panel.add(autoLoadDefaultFile, gbc);
 
         // Max preview rows
         gbc.gridx = 0; gbc.gridy = 2;
-        panel.add(new JLabel("Max Preview Rows:"), gbc);
+        JLabel maxRowsLabel = new JLabel("Max Preview Rows:");
+        maxRowsLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(maxRowsLabel, gbc);
         gbc.gridx = 1;
         maxPreviewRowsSpinner = new JSpinner(new SpinnerNumberModel(1000, 100, 10000, 100));
         maxPreviewRowsSpinner.setPreferredSize(new Dimension(100, 28));
@@ -164,7 +312,7 @@ public class SettingsPanel extends JPanel {
 
     private JPanel createDatabaseInfo() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(ThemeUtils.BG_CARD);
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(8, 0, 8, 10);
@@ -173,44 +321,61 @@ public class SettingsPanel extends JPanel {
 
         // DB Path
         gbc.gridx = 0; gbc.gridy = 0;
-        panel.add(new JLabel("Database File:"), gbc);
+        JLabel pathLabel = new JLabel("Database File:");
+        pathLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(pathLabel, gbc);
         gbc.gridx = 1; gbc.weightx = 1.0;
         dbPathLabel = new JLabel("-");
         dbPathLabel.setFont(dbPathLabel.getFont().deriveFont(Font.PLAIN, 12f));
-        dbPathLabel.setForeground(new Color(80, 80, 80));
+        dbPathLabel.setForeground(ThemeUtils.TEXT_MUTED);
         panel.add(dbPathLabel, gbc);
 
         // DB Size
         gbc.gridx = 0; gbc.gridy = 1;
-        panel.add(new JLabel("Database Size:"), gbc);
+        JLabel sizeLabel = new JLabel("Database Size:");
+        sizeLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(sizeLabel, gbc);
         gbc.gridx = 1;
         dbSizeLabel = new JLabel("-");
+        dbSizeLabel.setForeground(ThemeUtils.TEXT_PRIMARY);
         panel.add(dbSizeLabel, gbc);
 
         // Student count
         gbc.gridx = 0; gbc.gridy = 2;
-        panel.add(new JLabel("Students:"), gbc);
+        JLabel studentsLabel = new JLabel("Students:");
+        studentsLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(studentsLabel, gbc);
         gbc.gridx = 1;
         studentCountLabel = new JLabel("-");
+        studentCountLabel.setForeground(ThemeUtils.NEON_CYAN);
+        studentCountLabel.setFont(studentCountLabel.getFont().deriveFont(Font.BOLD));
         panel.add(studentCountLabel, gbc);
 
         // Payment count
         gbc.gridx = 0; gbc.gridy = 3;
-        panel.add(new JLabel("Payments:"), gbc);
+        JLabel paymentsLabel = new JLabel("Payments:");
+        paymentsLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(paymentsLabel, gbc);
         gbc.gridx = 1;
         paymentCountLabel = new JLabel("-");
+        paymentCountLabel.setForeground(ThemeUtils.NEON_GREEN);
+        paymentCountLabel.setFont(paymentCountLabel.getFont().deriveFont(Font.BOLD));
         panel.add(paymentCountLabel, gbc);
 
         // Last migration
         gbc.gridx = 0; gbc.gridy = 4;
-        panel.add(new JLabel("Last Migration:"), gbc);
+        JLabel migLabel = new JLabel("Last Migration:");
+        migLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(migLabel, gbc);
         gbc.gridx = 1;
         lastMigrationLabel = new JLabel("-");
+        lastMigrationLabel.setForeground(ThemeUtils.TEXT_MUTED);
         panel.add(lastMigrationLabel, gbc);
 
         // Refresh button
         gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 2;
-        JButton refreshButton = new JButton("Refresh Database Info");
+        JButton refreshButton = new JButton("🔄 Refresh Database Info");
+        ThemeUtils.styleButton(refreshButton, ThemeUtils.NEON_CYAN);
         refreshButton.addActionListener(e -> refreshDatabaseInfo());
         panel.add(refreshButton, gbc);
 
@@ -219,21 +384,24 @@ public class SettingsPanel extends JPanel {
 
     private JPanel createMaintenancePanel() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 5));
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(ThemeUtils.BG_CARD);
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JButton vacuumButton = new JButton("Vacuum Database");
+        JButton vacuumButton = new JButton("🗜️ Vacuum Database");
         vacuumButton.setToolTipText("Reclaim unused space and defragment database");
+        ThemeUtils.styleButton(vacuumButton, ThemeUtils.NEON_AMBER);
         vacuumButton.addActionListener(e -> vacuumDatabase());
         panel.add(vacuumButton);
 
-        JButton exportButton = new JButton("Export All Data (CSV)");
+        JButton exportButton = new JButton("📊 Export All Data (CSV)");
         exportButton.setToolTipText("Export all students and payments to CSV files");
+        ThemeUtils.styleButton(exportButton, ThemeUtils.NEON_GREEN);
         exportButton.addActionListener(e -> exportAllData());
         panel.add(exportButton);
 
-        JButton backupButton = new JButton("Create Backup");
+        JButton backupButton = new JButton("💾 Create Backup");
         backupButton.setToolTipText("Create a backup copy of the database");
+        ThemeUtils.styleButton(backupButton, ThemeUtils.NEON_PURPLE);
         backupButton.addActionListener(e -> createBackup());
         panel.add(backupButton);
 
@@ -242,7 +410,7 @@ public class SettingsPanel extends JPanel {
 
     private JPanel createAboutPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(ThemeUtils.BG_CARD);
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(8, 0, 8, 0);
@@ -251,26 +419,28 @@ public class SettingsPanel extends JPanel {
         gbc.gridx = 0; gbc.gridy = 0;
         JLabel appName = new JLabel("Student Payment Database");
         appName.setFont(appName.getFont().deriveFont(Font.BOLD, 16f));
+        appName.setForeground(ThemeUtils.TEXT_PRIMARY);
         panel.add(appName, gbc);
 
         gbc.gridy = 1;
         JLabel version = new JLabel("Version 2.0.0 (SQLite Edition)");
-        version.setForeground(new Color(100, 100, 100));
+        version.setForeground(ThemeUtils.TEXT_SECONDARY);
         panel.add(version, gbc);
 
         gbc.gridy = 2;
         JLabel desc = new JLabel("<html>Java Swing application for managing student payment records.<br>Uses SQLite with audit logging and import validation.</html>");
+        desc.setForeground(ThemeUtils.TEXT_PRIMARY);
         panel.add(desc, gbc);
 
         gbc.gridy = 3;
         JLabel tech = new JLabel("Java 17 • Maven • SQLite • Apache POI • Gson");
-        tech.setForeground(new Color(120, 120, 120));
+        tech.setForeground(ThemeUtils.TEXT_MUTED);
         tech.setFont(tech.getFont().deriveFont(Font.PLAIN, 11f));
         panel.add(tech, gbc);
 
         gbc.gridy = 4;
         JLabel build = new JLabel("Built: " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")));
-        build.setForeground(new Color(150, 150, 150));
+        build.setForeground(ThemeUtils.TEXT_MUTED);
         build.setFont(build.getFont().deriveFont(Font.PLAIN, 11f));
         panel.add(build, gbc);
 
@@ -292,6 +462,25 @@ public class SettingsPanel extends JPanel {
     private void loadSettings() {
         // Load database info
         refreshDatabaseInfo();
+
+        // Load academic period declaration
+        String currentAy = db.getCurrentAcademicYear();
+        ChargeAcademicTerm currentTerm = db.getCurrentAcademicTerm();
+        boolean autoAssign = db.isAutoAssignCurrentTerm();
+
+        if (currentAyCombo != null) {
+            currentAyCombo.setSelectedItem(currentAy);
+        }
+        if (currentTermCombo != null) {
+            currentTermCombo.setSelectedItem(currentTerm != null ? currentTerm.getLabel() : ChargeAcademicTerm.FIRST_SEM.getLabel());
+        }
+        if (autoAssignTermCheck != null) {
+            autoAssignTermCheck.setSelected(autoAssign);
+        }
+        if (currentPeriodStatusLabel != null) {
+            currentPeriodStatusLabel.setText(String.format("Active: %s (%s) • Auto-assign %s",
+                currentAy, currentTerm != null ? currentTerm.getLabel() : "1st Sem", autoAssign ? "ENABLED" : "DISABLED"));
+        }
 
         // Load default file path from DataManager
         String defaultFile = "Payment Import Jul 28, 2026.xlsx";

@@ -50,8 +50,75 @@ public class Student {
         return program;
     }
 
+    public String getFormattedProgramName() {
+        if (program == null || program.trim().isEmpty() || "-".equals(program.trim())) {
+            return "-";
+        }
+        String p = program.trim();
+        // Remove trailing year number and separators (e.g. "it-1" -> "IT", "cs-4" -> "CS", "emc 3" -> "EMC")
+        String code = p.replaceAll("(?i)[-_\\s]*[1-5]$", "").trim().toUpperCase();
+        if (code.isEmpty()) {
+            code = p.toUpperCase();
+        }
+
+        switch (code) {
+            case "IT":
+            case "BSIT":
+                return "Information Technology";
+            case "CS":
+            case "BSCS":
+                return "Computer Science";
+            case "IS":
+            case "BSIS":
+                return "Information System";
+            case "EMC":
+            case "BSEMC":
+                return "Entertainment Multimedia Computing";
+            case "ACT":
+                return "Associate in Computer Technology";
+            default:
+                return code;
+        }
+    }
+
     public Integer getYearLevel() {
-        return yearLevel;
+        if (yearLevel != null) {
+            return yearLevel;
+        }
+        return parseYearLevelFromProgram();
+    }
+
+    public Integer parseYearLevelFromProgram() {
+        if (program == null || program.trim().isEmpty()) {
+            return null;
+        }
+        String p = program.trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)(?:[-_\\s]|(?:\\b[a-zA-Z]+))([1-5])$").matcher(p);
+        if (m.find()) {
+            try {
+                return Integer.parseInt(m.group(1));
+            } catch (NumberFormatException ignored) {}
+        }
+        java.util.regex.Matcher m2 = java.util.regex.Pattern.compile("[-_\\s]([1-5])\\b").matcher(p);
+        if (m2.find()) {
+            try {
+                return Integer.parseInt(m2.group(1));
+            } catch (NumberFormatException ignored) {}
+        }
+        return null;
+    }
+
+    public String getFormattedYearLevel() {
+        Integer y = getYearLevel();
+        if (y == null) return "-";
+        switch (y) {
+            case 1: return "1st Year";
+            case 2: return "2nd Year";
+            case 3: return "3rd Year";
+            case 4: return "4th Year";
+            case 5: return "5th Year";
+            default: return "Year " + y;
+        }
     }
 
     public List<Payment> getPayments() {

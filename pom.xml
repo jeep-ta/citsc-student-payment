@@ -36,6 +36,18 @@
       <artifactId>sqlite-jdbc</artifactId>
       <version>3.46.1.3</version>
     </dependency>
+    <!-- Logging implementation for Log4j2 (used by Apache POI) -->
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-core</artifactId>
+      <version>2.23.1</version>
+    </dependency>
+    <!-- FlatLaf for modern UI and Dark Mode -->
+    <dependency>
+      <groupId>com.formdev</groupId>
+      <artifactId>flatlaf</artifactId>
+      <version>3.5.4</version>
+    </dependency>
     <!-- JUnit 5 for testing -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>
@@ -63,6 +75,7 @@
           <archive>
             <manifest>
               <addClasspath>true</addClasspath>
+              <classpathPrefix>lib/</classpathPrefix>
               <mainClass>com.payment.ui.MainFrame</mainClass>
             </manifest>
           </archive>

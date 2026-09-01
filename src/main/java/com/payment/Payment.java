@@ -7,6 +7,7 @@ public class Payment {
     public static final String STATUS_ACTIVE = "ACTIVE";
     public static final String STATUS_VOID = "VOID";
 
+    private int id;                   // Database primary key
     private int receiptNumber;
     private String name;              // Denormalized student name at creation time
     private String studentId;         // FK to Student.studentCode (internal record number)
@@ -19,6 +20,24 @@ public class Payment {
     private String remarks;
     private LocalDate remittanceDate;
     private String status;            // ACTIVE or VOID (no hard delete)
+
+    // Receipt-level default term and AY
+    private ChargeAcademicTerm chargeAcademicTerm; // Default term
+    private String academicYear;                  // Default AY e.g. "2025-2026"
+
+    // Itemized per-fee category terms and AY (allows different fees in same receipt to have different terms)
+    private ChargeAcademicTerm intelFeeTerm;
+    private String intelFeeAy;
+
+    private ChargeAcademicTerm tshirtTerm;
+    private String tshirtAy;
+
+    private ChargeAcademicTerm penaltiesTerm;
+    private String penaltiesAy;
+
+    private ChargeAcademicTerm citNightTerm;
+    private String citNightAy;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -36,6 +55,8 @@ public class Payment {
         this.remarks = remarks;
         this.remittanceDate = LocalDate.now(); // Default to today
         this.status = STATUS_ACTIVE;
+        this.chargeAcademicTerm = ChargeAcademicTerm.UNASSIGNED;
+        this.academicYear = null;
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
     }
@@ -44,11 +65,17 @@ public class Payment {
     public Payment() {
         this.remittanceDate = LocalDate.now();
         this.status = STATUS_ACTIVE;
+        this.chargeAcademicTerm = ChargeAcademicTerm.UNASSIGNED;
+        this.academicYear = null;
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
     }
 
     // --- Getters ---
+    public int getId() {
+        return id;
+    }
+
     public int getReceiptNumber() {
         return receiptNumber;
     }
@@ -105,6 +132,116 @@ public class Payment {
         return STATUS_ACTIVE.equals(status);
     }
 
+    public ChargeAcademicTerm getChargeAcademicTerm() {
+        return chargeAcademicTerm;
+    }
+
+    public String getChargeAcademicTermCode() {
+        return chargeAcademicTerm != null ? chargeAcademicTerm.getCode() : ChargeAcademicTerm.DB_UNASSIGNED;
+    }
+
+    public String getAcademicYear() {
+        return academicYear;
+    }
+
+    // --- Itemized Term & AY Getters & Setters ---
+
+    public ChargeAcademicTerm getIntelFeeTerm() {
+        return intelFeeTerm;
+    }
+
+    public void setIntelFeeTerm(ChargeAcademicTerm intelFeeTerm) {
+        this.intelFeeTerm = intelFeeTerm;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public String getIntelFeeAy() {
+        return intelFeeAy;
+    }
+
+    public void setIntelFeeAy(String intelFeeAy) {
+        this.intelFeeAy = intelFeeAy;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public ChargeAcademicTerm getTshirtTerm() {
+        return tshirtTerm;
+    }
+
+    public void setTshirtTerm(ChargeAcademicTerm tshirtTerm) {
+        this.tshirtTerm = tshirtTerm;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public String getTshirtAy() {
+        return tshirtAy;
+    }
+
+    public void setTshirtAy(String tshirtAy) {
+        this.tshirtAy = tshirtAy;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public ChargeAcademicTerm getPenaltiesTerm() {
+        return penaltiesTerm;
+    }
+
+    public void setPenaltiesTerm(ChargeAcademicTerm penaltiesTerm) {
+        this.penaltiesTerm = penaltiesTerm;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public String getPenaltiesAy() {
+        return penaltiesAy;
+    }
+
+    public void setPenaltiesAy(String penaltiesAy) {
+        this.penaltiesAy = penaltiesAy;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public ChargeAcademicTerm getCitNightTerm() {
+        return citNightTerm;
+    }
+
+    public void setCitNightTerm(ChargeAcademicTerm citNightTerm) {
+        this.citNightTerm = citNightTerm;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public String getCitNightAy() {
+        return citNightAy;
+    }
+
+    public void setCitNightAy(String citNightAy) {
+        this.citNightAy = citNightAy;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    /**
+     * Effective Term for a specific fee category.
+     * Falls back to general chargeAcademicTerm if specific is null.
+     */
+    public ChargeAcademicTerm getEffectiveTermForCategory(String category) {
+        if ("Intel Fee".equalsIgnoreCase(category) && intelFeeTerm != null) return intelFeeTerm;
+        if (("T-Shirt".equalsIgnoreCase(category) || "T-Shirt Sizing".equalsIgnoreCase(category)) && tshirtTerm != null) return tshirtTerm;
+        if ("Penalties".equalsIgnoreCase(category) && penaltiesTerm != null) return penaltiesTerm;
+        if ("CIT Night".equalsIgnoreCase(category) && citNightTerm != null) return citNightTerm;
+        return chargeAcademicTerm != null ? chargeAcademicTerm : ChargeAcademicTerm.UNASSIGNED;
+    }
+
+    /**
+     * Effective Academic Year for a specific fee category.
+     * Falls back to general academicYear if specific is null.
+     */
+    public String getEffectiveAyForCategory(String category) {
+        if ("Intel Fee".equalsIgnoreCase(category) && intelFeeAy != null && !intelFeeAy.trim().isEmpty()) return intelFeeAy.trim();
+        if (("T-Shirt".equalsIgnoreCase(category) || "T-Shirt Sizing".equalsIgnoreCase(category)) && tshirtAy != null && !tshirtAy.trim().isEmpty()) return tshirtAy.trim();
+        if ("Penalties".equalsIgnoreCase(category) && penaltiesAy != null && !penaltiesAy.trim().isEmpty()) return penaltiesAy.trim();
+        if ("CIT Night".equalsIgnoreCase(category) && citNightAy != null && !citNightAy.trim().isEmpty()) return citNightAy.trim();
+        return academicYear != null && !academicYear.trim().isEmpty() ? academicYear.trim() : null;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -114,6 +251,10 @@ public class Payment {
     }
 
     // --- Setters ---
+    public void setId(int id) {
+        this.id = id;
+    }
+
     public void setReceiptNumber(int receiptNumber) {
         this.receiptNumber = receiptNumber;
     }
@@ -163,6 +304,21 @@ public class Payment {
         this.updatedAt = LocalDateTime.now();
     }
 
+    public void setChargeAcademicTerm(ChargeAcademicTerm chargeAcademicTerm) {
+        this.chargeAcademicTerm = chargeAcademicTerm != null ? chargeAcademicTerm : ChargeAcademicTerm.UNASSIGNED;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void setChargeAcademicTermCode(String code) {
+        this.chargeAcademicTerm = ChargeAcademicTerm.fromCode(code);
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void setAcademicYear(String academicYear) {
+        this.academicYear = academicYear;
+        this.updatedAt = LocalDateTime.now();
+    }
+
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
     }
@@ -188,9 +344,6 @@ public class Payment {
     /**
      * Compare this payment's financial fields against another payment with same receipt number.
      * Used for CONFLICT detection.
-     *
-     * @param other The other payment (same receipt number)
-     * @return true if all financial fields are identical
      */
     public boolean isExactDuplicateOf(Payment other) {
         if (other == null) return false;
@@ -202,7 +355,9 @@ public class Payment {
             && equalsNullable(citNight, other.citNight)
             && equalsNullable(receivedBy, other.receivedBy)
             && equalsNullable(remarks, other.remarks)
-            && equalsNullable(remittanceDate, other.remittanceDate);
+            && equalsNullable(remittanceDate, other.remittanceDate)
+            && equalsNullable(chargeAcademicTerm, other.chargeAcademicTerm)
+            && equalsNullable(academicYear, other.academicYear);
     }
 
     private static boolean equalsNullable(Object a, Object b) {

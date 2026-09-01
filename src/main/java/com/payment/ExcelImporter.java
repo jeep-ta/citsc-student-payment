@@ -40,6 +40,7 @@ public class ExcelImporter {
                 Cell citNightCell = row.getCell(7);
                 Cell receivedByCell = row.getCell(8);
                 Cell remarksCell = row.getCell(9);
+                Cell chargeTermCell = row.getCell(10); // Optional: CURRENT/PREVIOUS/UNASSIGNED
 
                 // Skip empty rows
                 if (nameCell == null || getStringValue(nameCell).trim().isEmpty()) {
@@ -55,6 +56,7 @@ public class ExcelImporter {
                 Double citNight = getNumericValueOrNull(citNightCell);
                 String receivedBy = getStringValue(receivedByCell).trim();
                 String remarks = getStringValue(remarksCell).trim();
+                ChargeAcademicTerm chargeTerm = ChargeAcademicTerm.fromCode(getStringValue(chargeTermCell).trim());
 
                 // Normalize name for matching key
                 String normalizedName = NameNormalizer.normalize(name);
@@ -77,6 +79,7 @@ public class ExcelImporter {
                         intelFee, tshirtSizing, penalties, citNight,
                         receivedBy, remarks);
                 payment.setRemittanceDate(remittanceDate);
+                payment.setChargeAcademicTerm(chargeTerm);
                 student.addPayment(payment);
             }
         }

@@ -31,79 +31,99 @@ public class AuditLogPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout(10, 10));
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        setBackground(Color.WHITE);
+        setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        setBackground(ThemeUtils.BG_DEEPEST);
 
-        // Title
-        JLabel titleLabel = new JLabel("Audit Log");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 24f));
-        titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 15, 0));
-        add(titleLabel, BorderLayout.NORTH);
+        // Header
+        JPanel headerPanel = new JPanel(new BorderLayout(0, 10));
+        headerPanel.setOpaque(false);
 
-        // Toolbar
-        JPanel toolBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
-        toolBar.setBackground(Color.WHITE);
-        toolBar.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(220, 220, 220), 1),
-            BorderFactory.createEmptyBorder(10, 10, 10, 10)
+        // Title banner
+        JPanel titleBanner = ThemeUtils.createGradientPanel(new Color(15, 23, 42), new Color(10, 14, 26));
+        titleBanner.setLayout(new BorderLayout());
+        titleBanner.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 2, 0, ThemeUtils.NEON_CYAN),
+            BorderFactory.createEmptyBorder(12, 16, 12, 16)
         ));
 
-        toolBar.add(new JLabel("Entity Type:"));
+        JLabel titleLabel = new JLabel("📋 Audit Trail & System Logs");
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 22f));
+        titleLabel.setForeground(ThemeUtils.NEON_CYAN);
+        titleBanner.add(titleLabel, BorderLayout.WEST);
+
+        JLabel subtitleLabel = new JLabel("Financial Record Change History");
+        subtitleLabel.setFont(subtitleLabel.getFont().deriveFont(Font.PLAIN, 12f));
+        subtitleLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        titleBanner.add(subtitleLabel, BorderLayout.EAST);
+
+        headerPanel.add(titleBanner, BorderLayout.NORTH);
+
+        // Toolbar
+        JPanel toolBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 6));
+        toolBar.setBackground(ThemeUtils.BG_CARD);
+        toolBar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1),
+            BorderFactory.createEmptyBorder(8, 10, 8, 10)
+        ));
+
+        JLabel typeLbl = new JLabel("Entity Type:");
+        typeLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
+        toolBar.add(typeLbl);
         entityTypeFilter = new JComboBox<>(new String[]{
             "All", "STUDENT", "PAYMENT", "IMPORT_BATCH", "DATABASE"
         });
         entityTypeFilter.addActionListener(e -> loadAuditLogs(200));
         toolBar.add(entityTypeFilter);
 
-        toolBar.add(new JLabel("Entity ID:"));
+        JLabel idLbl = new JLabel("Entity ID:");
+        idLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
+        toolBar.add(idLbl);
         entityIdFilter = new JTextField(15);
         entityIdFilter.addActionListener(e -> loadAuditLogs(200));
         toolBar.add(entityIdFilter);
 
-        JButton refreshButton = new JButton("Refresh");
+        JButton refreshButton = new JButton("🔄 Refresh");
+        ThemeUtils.styleButton(refreshButton, ThemeUtils.NEON_CYAN);
         refreshButton.addActionListener(e -> loadAuditLogs(200));
         toolBar.add(refreshButton);
 
-        JButton exportButton = new JButton("Export to CSV");
+        JButton exportButton = new JButton("📊 Export CSV");
+        ThemeUtils.styleButton(exportButton, ThemeUtils.NEON_GREEN);
         exportButton.addActionListener(e -> exportToCSV());
         toolBar.add(exportButton);
 
-        add(toolBar, BorderLayout.CENTER);
+        headerPanel.add(toolBar, BorderLayout.CENTER);
+        add(headerPanel, BorderLayout.NORTH);
 
         // Table
         auditTableModel = new AuditTableModel();
         auditTable = new JTable(auditTableModel);
-        auditTable.setRowHeight(28);
-        auditTable.setShowGrid(false);
-        auditTable.setIntercellSpacing(new Dimension(0, 1));
-        auditTable.getTableHeader().setReorderingAllowed(false);
-        auditTable.getTableHeader().setBackground(new Color(245, 245, 245));
-        auditTable.getTableHeader().setFont(auditTable.getTableHeader().getFont().deriveFont(Font.BOLD, 12f));
-        auditTable.setFont(auditTable.getFont().deriveFont(Font.PLAIN, 12f));
+        ThemeUtils.applyTableTheme(auditTable);
         auditTable.setAutoCreateRowSorter(true);
 
         // Column widths
-        auditTable.getColumnModel().getColumn(0).setPreferredWidth(150); // Timestamp
-        auditTable.getColumnModel().getColumn(1).setPreferredWidth(80);  // Action
-        auditTable.getColumnModel().getColumn(2).setPreferredWidth(100); // Entity Type
-        auditTable.getColumnModel().getColumn(3).setPreferredWidth(100); // Entity ID
-        auditTable.getColumnModel().getColumn(4).setPreferredWidth(250); // Old Value
-        auditTable.getColumnModel().getColumn(5).setPreferredWidth(250); // New Value
-        auditTable.getColumnModel().getColumn(6).setPreferredWidth(250); // Reason
-        auditTable.getColumnModel().getColumn(7).setPreferredWidth(80);  // User
+        auditTable.getColumnModel().getColumn(0).setPreferredWidth(150);
+        auditTable.getColumnModel().getColumn(1).setPreferredWidth(80);
+        auditTable.getColumnModel().getColumn(2).setPreferredWidth(100);
+        auditTable.getColumnModel().getColumn(3).setPreferredWidth(100);
+        auditTable.getColumnModel().getColumn(4).setPreferredWidth(250);
+        auditTable.getColumnModel().getColumn(5).setPreferredWidth(250);
+        auditTable.getColumnModel().getColumn(6).setPreferredWidth(250);
+        auditTable.getColumnModel().getColumn(7).setPreferredWidth(80);
 
         // Custom renderer for action column
         auditTable.getColumnModel().getColumn(1).setCellRenderer(new ActionCellRenderer());
 
         JScrollPane scrollPane = new JScrollPane(auditTable);
-        scrollPane.setBorder(BorderFactory.createLineBorder(new Color(220, 220, 220), 1));
-        scrollPane.getViewport().setBackground(Color.WHITE);
-        add(scrollPane, BorderLayout.SOUTH);
+        scrollPane.setBorder(BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1));
+        scrollPane.getViewport().setBackground(ThemeUtils.BG_SURFACE);
+        add(scrollPane, BorderLayout.CENTER);
 
         // Status bar
-        statusLabel = new JLabel("Loading...");
+        statusLabel = new JLabel("Loading audit logs...");
+        statusLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
         statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-        add(statusLabel, BorderLayout.PAGE_END);
+        add(statusLabel, BorderLayout.SOUTH);
     }
 
     public void loadAuditLogs(int limit) {
@@ -152,16 +172,12 @@ public class AuditLogPanel extends JPanel {
         int result = fileChooser.showSaveDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             try (java.io.PrintWriter writer = new java.io.PrintWriter(fileChooser.getSelectedFile())) {
-                // Write header
                 writer.println("Timestamp,Action,Entity Type,Entity ID,Old Value,New Value,Reason,User");
-
-                // Write data
                 for (int i = 0; i < auditTableModel.getRowCount(); i++) {
                     StringBuilder row = new StringBuilder();
                     for (int j = 0; j < auditTableModel.getColumnCount(); j++) {
                         Object value = auditTableModel.getValueAt(i, j);
                         String str = value != null ? value.toString() : "";
-                        // Escape commas and quotes
                         if (str.contains(",") || str.contains("\"") || str.contains("\n")) {
                             str = "\"" + str.replace("\"", "\"\"") + "\"";
                         }
@@ -191,26 +207,14 @@ public class AuditLogPanel extends JPanel {
             fireTableDataChanged();
         }
 
-        @Override
-        public int getRowCount() {
-            return logs != null ? logs.size() : 0;
-        }
-
-        @Override
-        public int getColumnCount() {
-            return COLUMN_NAMES.length;
-        }
-
-        @Override
-        public String getColumnName(int column) {
-            return COLUMN_NAMES[column];
-        }
+        @Override public int getRowCount() { return logs != null ? logs.size() : 0; }
+        @Override public int getColumnCount() { return COLUMN_NAMES.length; }
+        @Override public String getColumnName(int column) { return COLUMN_NAMES[column]; }
 
         @Override
         public Object getValueAt(int rowIndex, int columnIndex) {
             if (logs == null || rowIndex >= logs.size()) return null;
             Map<String, Object> row = logs.get(rowIndex);
-
             switch (columnIndex) {
                 case 0: return formatTimestamp(row.get("timestamp"));
                 case 1: return row.get("action");
@@ -241,25 +245,23 @@ public class AuditLogPanel extends JPanel {
     private static class ActionCellRenderer extends DefaultTableCellRenderer {
         private static final java.util.Map<String, Color> ACTION_COLORS = new java.util.HashMap<>();
         static {
-            ACTION_COLORS.put("CREATE", new Color(0, 150, 0));
-            ACTION_COLORS.put("UPDATE", new Color(0, 100, 200));
-            ACTION_COLORS.put("VOID", new Color(200, 0, 0));
-            ACTION_COLORS.put("IMPORT", new Color(150, 0, 150));
-            ACTION_COLORS.put("MERGE", new Color(0, 150, 150));
-            ACTION_COLORS.put("DELETE", new Color(150, 0, 0));
+            ACTION_COLORS.put("CREATE", ThemeUtils.NEON_GREEN);
+            ACTION_COLORS.put("UPDATE", ThemeUtils.NEON_CYAN);
+            ACTION_COLORS.put("VOID", ThemeUtils.NEON_ROSE);
+            ACTION_COLORS.put("IMPORT", ThemeUtils.NEON_PURPLE);
+            ACTION_COLORS.put("MERGE", ThemeUtils.NEON_AMBER);
+            ACTION_COLORS.put("UNDO_MERGE", ThemeUtils.NEON_CYAN);
+            ACTION_COLORS.put("DELETE", ThemeUtils.NEON_ROSE);
         }
 
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value,
                 boolean isSelected, boolean hasFocus, int row, int column) {
             Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-
             if (value != null) {
                 String action = value.toString();
-                Color color = ACTION_COLORS.getOrDefault(action, Color.BLACK);
-                if (!isSelected) {
-                    c.setForeground(color);
-                }
+                Color color = ACTION_COLORS.getOrDefault(action, ThemeUtils.TEXT_SECONDARY);
+                if (!isSelected) c.setForeground(color);
                 setText(action);
                 setHorizontalAlignment(CENTER);
                 setFont(getFont().deriveFont(Font.BOLD, 11f));

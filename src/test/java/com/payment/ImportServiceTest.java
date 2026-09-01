@@ -21,8 +21,12 @@ public class ImportServiceTest {
     private static ImportService importService;
     private static String testFile;
 
+    private static final String TEST_DB_FILE = "test_import_payment.db";
+
     @BeforeAll
     static void setup() throws IOException {
+        DatabaseManager.setCustomDatabaseUrl("jdbc:sqlite:" + TEST_DB_FILE);
+        DatabaseManager.resetInstance();
         db = DatabaseManager.getInstance();
         importService = new ImportService();
 
@@ -32,9 +36,13 @@ public class ImportServiceTest {
 
     @AfterAll
     static void cleanup() {
-        // Clean up test file
+        // Clean up test file and database
         new File(testFile).delete();
-        db.close();
+        DatabaseManager.resetInstance();
+        new File(TEST_DB_FILE).delete();
+        new File(TEST_DB_FILE + "-wal").delete();
+        new File(TEST_DB_FILE + "-shm").delete();
+        DatabaseManager.setCustomDatabaseUrl(null);
     }
 
     @BeforeEach

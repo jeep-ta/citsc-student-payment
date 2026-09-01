@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Import Service handles the full import workflow:
@@ -40,6 +39,9 @@ public class ImportService {
         List<ImportPreviewItem> previewItems = new ArrayList<>();
         int rowNumber = 1; // Excel row (1-based, after header)
 
+        ChargeAcademicTerm activeTerm = db.getCurrentAcademicTerm();
+        boolean autoAssign = db.isAutoAssignCurrentTerm();
+
         for (Student parsedStudent : parsedStudents) {
             for (Payment payment : parsedStudent.getPayments()) {
                 ImportPreviewItem item = new ImportPreviewItem(
@@ -55,6 +57,12 @@ public class ImportService {
                     payment.getRemarks(),
                     payment.getRemittanceDate()
                 );
+                // Carry academic term or auto-assign active term if configured
+                if (autoAssign && (payment.getChargeAcademicTerm() == null || payment.getChargeAcademicTerm() == ChargeAcademicTerm.UNASSIGNED)) {
+                    item.setChargeAcademicTerm(activeTerm != null ? activeTerm : ChargeAcademicTerm.FIRST_SEM);
+                } else {
+                    item.setChargeAcademicTerm(payment.getChargeAcademicTerm());
+                }
                 previewItems.add(item);
             }
         }
@@ -168,6 +176,10 @@ public class ImportService {
             item.getRemarks()
         );
         itemPayment.setRemittanceDate(item.getRemittanceDate());
+        itemPayment.setChargeAcademicTerm(item.getChargeAcademicTerm());
+        if (existing.getAcademicYear() != null && db.isAutoAssignCurrentTerm()) {
+            itemPayment.setAcademicYear(db.getCurrentAcademicYear());
+        }
 
         return itemPayment.isExactDuplicateOf(existing);
     }
@@ -321,6 +333,11 @@ public class ImportService {
                     payment.setStudentId(studentCode);
                     payment.setRemittanceDate(item.getRemittanceDate());
                     payment.setStatus(Payment.STATUS_ACTIVE);
+                    // Set charge academic term from preview item
+                    payment.setChargeAcademicTerm(item.getChargeAcademicTerm());
+                    if (db.isAutoAssignCurrentTerm()) {
+                        payment.setAcademicYear(db.getCurrentAcademicYear());
+                    }
                     db.insertPayment(payment);
 
                     // Log payment creation
