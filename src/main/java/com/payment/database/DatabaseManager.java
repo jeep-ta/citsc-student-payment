@@ -3,6 +3,7 @@ package com.payment.database;
 import com.payment.ChargeAcademicTerm;
 import com.payment.ImportBatch;
 import com.payment.ImportBatchFile;
+import com.payment.FeeTermRule;
 import com.payment.Payment;
 import com.payment.ReceiptKey;
 import com.payment.Student;
@@ -137,6 +138,10 @@ public class DatabaseManager {
             "    import_batch_code TEXT," +
             "    import_source_file TEXT," +
             "    import_source_row INTEGER," +
+            "    intel_fee_term TEXT, intel_fee_ay TEXT," +
+            "    tshirt_term TEXT, tshirt_ay TEXT," +
+            "    penalties_term TEXT, penalties_ay TEXT," +
+            "    cit_night_term TEXT, cit_night_ay TEXT," +
             "    created_at TEXT NOT NULL," +
             "    updated_at TEXT NOT NULL," +
             "    FOREIGN KEY (student_id) REFERENCES students(student_code)" +
@@ -146,6 +151,19 @@ public class DatabaseManager {
             "CREATE INDEX IF NOT EXISTS idx_payments_receipt_number ON payments(receipt_number)",
             "CREATE INDEX IF NOT EXISTS idx_payments_student_id ON payments(student_id)",
             "CREATE INDEX IF NOT EXISTS idx_payments_remittance_date ON payments(remittance_date)",
+
+            "CREATE TABLE IF NOT EXISTS fee_term_rules (" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT," +
+            "    category TEXT NOT NULL," +
+            "    start_date TEXT NOT NULL," +
+            "    end_date TEXT NOT NULL," +
+            "    academic_year TEXT NOT NULL," +
+            "    term TEXT NOT NULL," +
+            "    enabled INTEGER NOT NULL DEFAULT 1," +
+            "    created_at TEXT NOT NULL," +
+            "    updated_at TEXT NOT NULL" +
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_fee_term_rules_lookup ON fee_term_rules(category, start_date, end_date, enabled)",
 
             // import_batches table
             "CREATE TABLE IF NOT EXISTS import_batches (" +
@@ -299,7 +317,8 @@ public class DatabaseManager {
 
             stmt.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_payments_receipt_scope " +
                 "ON payments(receipt_number, receipt_academic_year, receipt_term) " +
-                "WHERE receipt_academic_year IS NOT NULL " +
+                "WHERE receipt_number > 0 " +
+                "AND receipt_academic_year IS NOT NULL " +
                 "AND TRIM(receipt_academic_year) <> '' " +
                 "AND receipt_term IN ('1ST_SEM', '2ND_SEM', 'SUMMER')");
 
@@ -310,6 +329,7 @@ public class DatabaseManager {
                 "    file_hash TEXT NOT NULL," +
                 "    receipt_academic_year TEXT," +
                 "    receipt_term TEXT," +
+                "    remittance_date TEXT," +
                 "    total_rows INTEGER NOT NULL DEFAULT 0," +
                 "    new_records INTEGER NOT NULL DEFAULT 0," +
                 "    duplicate_records INTEGER NOT NULL DEFAULT 0," +
@@ -323,7 +343,8 @@ public class DatabaseManager {
 
             String[][] batchFileColumns = {
                 {"receipt_academic_year", "TEXT"},
-                {"receipt_term", "TEXT"}
+                {"receipt_term", "TEXT"},
+                {"remittance_date", "TEXT"}
             };
             for (String[] batchFileColumn : batchFileColumns) {
                 try (ResultSet rs = connection.getMetaData().getColumns(null, null, "import_batch_files", batchFileColumn[0])) {
@@ -337,6 +358,12 @@ public class DatabaseManager {
             }
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_import_batch_files_batch ON import_batch_files(batch_code)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_import_batch_files_hash ON import_batch_files(file_hash)");
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS fee_term_rules (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL, start_date TEXT NOT NULL, " +
+                "end_date TEXT NOT NULL, academic_year TEXT NOT NULL, term TEXT NOT NULL, " +
+                "enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_fee_term_rules_lookup ON fee_term_rules(category, start_date, end_date, enabled)");
 
             // Create app_settings table if not exists
             stmt.execute("CREATE TABLE IF NOT EXISTS app_settings (" +
@@ -771,8 +798,9 @@ public class DatabaseManager {
     public int insertPayment(Payment payment) throws SQLException {
         String sql = "INSERT INTO payments (receipt_number, student_id, name, program, intel_fee, tshirt_sizing, " +
                      "penalties, cit_night, received_by, remarks, remittance_date, charge_academic_term, academic_year, status, " +
-                     "receipt_academic_year, receipt_term, import_batch_code, import_source_file, import_source_row, created_at, updated_at) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                     "receipt_academic_year, receipt_term, import_batch_code, import_source_file, import_source_row, " +
+                     "intel_fee_term, intel_fee_ay, tshirt_term, tshirt_ay, penalties_term, penalties_ay, cit_night_term, cit_night_ay, created_at, updated_at) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (PreparedStatement stmt = getConnection().prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             stmt.setInt(1, payment.getReceiptNumber());
@@ -802,8 +830,16 @@ public class DatabaseManager {
             } else {
                 stmt.setNull(19, Types.INTEGER);
             }
-            stmt.setString(20, payment.getCreatedAt().toString());
-            stmt.setString(21, payment.getUpdatedAt().toString());
+            stmt.setString(20, payment.getIntelFeeTerm() != null ? payment.getIntelFeeTerm().getCode() : null);
+            stmt.setString(21, payment.getIntelFeeAy());
+            stmt.setString(22, payment.getTshirtTerm() != null ? payment.getTshirtTerm().getCode() : null);
+            stmt.setString(23, payment.getTshirtAy());
+            stmt.setString(24, payment.getPenaltiesTerm() != null ? payment.getPenaltiesTerm().getCode() : null);
+            stmt.setString(25, payment.getPenaltiesAy());
+            stmt.setString(26, payment.getCitNightTerm() != null ? payment.getCitNightTerm().getCode() : null);
+            stmt.setString(27, payment.getCitNightAy());
+            stmt.setString(28, payment.getCreatedAt().toString());
+            stmt.setString(29, payment.getUpdatedAt().toString());
 
             stmt.executeUpdate();
 
@@ -1170,21 +1206,23 @@ public class DatabaseManager {
 
     public int insertImportBatchFile(ImportBatchFile file) throws SQLException {
         String sql = "INSERT INTO import_batch_files (batch_code, file_name, file_hash, receipt_academic_year, receipt_term, " +
-                     "total_rows, new_records, duplicate_records, conflict_records, error_records, status, created_at) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                     "remittance_date, total_rows, new_records, duplicate_records, conflict_records, error_records, status, created_at) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = getConnection().prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             stmt.setString(1, file.getBatchCode());
             stmt.setString(2, file.getFileName());
             stmt.setString(3, file.getFileHash());
             stmt.setString(4, file.getReceiptAcademicYear());
             stmt.setString(5, file.getReceiptTerm().getCode());
-            stmt.setInt(6, file.getTotalRows());
-            stmt.setInt(7, file.getNewRecords());
-            stmt.setInt(8, file.getDuplicateRecords());
-            stmt.setInt(9, file.getConflictRecords());
-            stmt.setInt(10, file.getErrorRecords());
-            stmt.setString(11, file.getStatus());
-            stmt.setString(12, file.getCreatedAt().toString());
+            if (file.getRemittanceDate() != null) stmt.setString(6, file.getRemittanceDate().toString());
+            else stmt.setNull(6, Types.VARCHAR);
+            stmt.setInt(7, file.getTotalRows());
+            stmt.setInt(8, file.getNewRecords());
+            stmt.setInt(9, file.getDuplicateRecords());
+            stmt.setInt(10, file.getConflictRecords());
+            stmt.setInt(11, file.getErrorRecords());
+            stmt.setString(12, file.getStatus());
+            stmt.setString(13, file.getCreatedAt().toString());
             stmt.executeUpdate();
             try (ResultSet rs = stmt.getGeneratedKeys()) {
                 if (rs.next()) {
@@ -1210,6 +1248,10 @@ public class DatabaseManager {
                     file.setFileHash(rs.getString("file_hash"));
                     file.setReceiptAcademicYear(rs.getString("receipt_academic_year"));
                     file.setReceiptTerm(ChargeAcademicTerm.fromCode(rs.getString("receipt_term")));
+                    String remittanceDate = rs.getString("remittance_date");
+                    if (remittanceDate != null && !remittanceDate.isBlank()) {
+                        file.setRemittanceDate(LocalDate.parse(remittanceDate));
+                    }
                     file.setTotalRows(rs.getInt("total_rows"));
                     file.setNewRecords(rs.getInt("new_records"));
                     file.setDuplicateRecords(rs.getInt("duplicate_records"));
@@ -1422,6 +1464,9 @@ public class DatabaseManager {
     }
 
     private int findUniquePaymentIdByReceipt(int receiptNumber) throws SQLException {
+        if (receiptNumber <= 0) {
+            throw new IllegalArgumentException("Receipt-less payments must be selected by payment ID");
+        }
         String sql = "SELECT id FROM payments WHERE receipt_number = ? ORDER BY id";
         Integer paymentId = null;
         try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
@@ -1577,11 +1622,98 @@ public class DatabaseManager {
         return false;
     }
 
+    // ==================== Fee attribution rules ====================
+
+    public List<FeeTermRule> getFeeTermRules() throws SQLException {
+        List<FeeTermRule> rules = new ArrayList<>();
+        String sql = "SELECT * FROM fee_term_rules ORDER BY category, start_date, id";
+        try (Statement stmt = getConnection().createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                FeeTermRule rule = new FeeTermRule(
+                    rs.getString("category"), LocalDate.parse(rs.getString("start_date")),
+                    LocalDate.parse(rs.getString("end_date")), rs.getString("academic_year"),
+                    ChargeAcademicTerm.fromCode(rs.getString("term")));
+                rule.setId(rs.getInt("id"));
+                rule.setEnabled(rs.getInt("enabled") != 0);
+                rules.add(rule);
+            }
+        }
+        return rules;
+    }
+
+    public int insertFeeTermRule(FeeTermRule rule) throws SQLException {
+        rule.validate();
+        String now = LocalDateTime.now().toString();
+        String sql = "INSERT INTO fee_term_rules(category,start_date,end_date,academic_year,term,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)";
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            stmt.setString(1, rule.getCategory()); stmt.setString(2, rule.getStartDate().toString());
+            stmt.setString(3, rule.getEndDate().toString()); stmt.setString(4, rule.getAcademicYear());
+            stmt.setString(5, rule.getTerm().getCode()); stmt.setInt(6, rule.isEnabled() ? 1 : 0);
+            stmt.setString(7, now); stmt.setString(8, now); stmt.executeUpdate();
+            try (ResultSet rs = stmt.getGeneratedKeys()) { if (rs.next()) { rule.setId(rs.getInt(1)); return rule.getId(); } }
+        }
+        return -1;
+    }
+
+    public boolean updateFeeTermRule(FeeTermRule rule) throws SQLException {
+        rule.validate();
+        String sql = "UPDATE fee_term_rules SET category=?,start_date=?,end_date=?,academic_year=?,term=?,enabled=?,updated_at=? WHERE id=?";
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+            stmt.setString(1, rule.getCategory()); stmt.setString(2, rule.getStartDate().toString());
+            stmt.setString(3, rule.getEndDate().toString()); stmt.setString(4, rule.getAcademicYear());
+            stmt.setString(5, rule.getTerm().getCode()); stmt.setInt(6, rule.isEnabled() ? 1 : 0);
+            stmt.setString(7, LocalDateTime.now().toString()); stmt.setInt(8, rule.getId());
+            return stmt.executeUpdate() > 0;
+        }
+    }
+
+    public boolean deleteFeeTermRule(int id) throws SQLException {
+        try (PreparedStatement stmt = getConnection().prepareStatement("DELETE FROM fee_term_rules WHERE id=?")) {
+            stmt.setInt(1, id); return stmt.executeUpdate() > 0;
+        }
+    }
+
+    /** Re-apply current date rules to existing active payments immediately. */
+    public int refreshFeeTermAssignments() throws SQLException {
+        List<FeeTermRule> rules = getFeeTermRules();
+        if (rules.isEmpty()) return 0;
+        int updated = 0;
+        for (Payment payment : getAllPayments()) {
+            if (!payment.isActive() || payment.getRemittanceDate() == null) continue;
+            boolean changed = false;
+            for (String category : new String[]{FeeTermRule.INTEL_FEE, FeeTermRule.T_SHIRT, FeeTermRule.PENALTIES, FeeTermRule.CIT_NIGHT}) {
+                double amount = switch (category) {
+                    case FeeTermRule.INTEL_FEE -> payment.getIntelFee() == null ? 0 : payment.getIntelFee();
+                    case FeeTermRule.T_SHIRT -> payment.getTshirtSizing() == null ? 0 : payment.getTshirtSizing();
+                    case FeeTermRule.PENALTIES -> payment.getPenalties() == null ? 0 : payment.getPenalties();
+                    default -> payment.getCitNight() == null ? 0 : payment.getCitNight();
+                };
+                if (amount <= 0) continue;
+                FeeTermRule match = null;
+                for (FeeTermRule rule : rules) if (rule.getCategory().equals(category) && rule.matches(payment.getRemittanceDate())) match = rule;
+                if (match == null) continue;
+                // Persist the category tag even when it happens to equal the
+                // payment's default attribution; it must remain independent
+                // if the default is changed later.
+                changed = true;
+                payment.setCategoryAttribution(category, match.getTerm(), match.getAcademicYear());
+            }
+            if (changed && updatePaymentItemTerms(payment.getId(), payment.getChargeAcademicTerm(), payment.getAcademicYear(),
+                    payment.getIntelFeeTerm(), payment.getIntelFeeAy(), payment.getTshirtTerm(), payment.getTshirtAy(),
+                    payment.getPenaltiesTerm(), payment.getPenaltiesAy(), payment.getCitNightTerm(), payment.getCitNightAy(),
+                    "Reapplied fee date attribution rules", "system") ) updated++;
+        }
+        return updated;
+    }
+
     /**
      * Get distinct academic years present in payments.
      */
     public List<String> getDistinctAcademicYears() throws SQLException {
-        String sql = "SELECT DISTINCT academic_year FROM payments WHERE academic_year IS NOT NULL AND TRIM(academic_year) != '' ORDER BY 1 DESC";
+        String sql = "SELECT DISTINCT academic_year FROM (" +
+            "SELECT academic_year FROM payments UNION SELECT intel_fee_ay FROM payments UNION SELECT tshirt_ay FROM payments " +
+            "UNION SELECT penalties_ay FROM payments UNION SELECT cit_night_ay FROM payments) " +
+            "WHERE academic_year IS NOT NULL AND TRIM(academic_year) != '' ORDER BY 1 DESC";
         List<String> list = new ArrayList<>();
         try (Statement stmt = getConnection().createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {
@@ -1599,7 +1731,10 @@ public class DatabaseManager {
      * Get distinct terms present in payments.
      */
     public List<String> getDistinctTerms() throws SQLException {
-        String sql = "SELECT DISTINCT charge_academic_term FROM payments WHERE charge_academic_term IS NOT NULL AND TRIM(charge_academic_term) != '' ORDER BY 1";
+        String sql = "SELECT DISTINCT term FROM (" +
+            "SELECT charge_academic_term AS term FROM payments UNION SELECT intel_fee_term FROM payments UNION SELECT tshirt_term FROM payments " +
+            "UNION SELECT penalties_term FROM payments UNION SELECT cit_night_term FROM payments) " +
+            "WHERE term IS NOT NULL AND TRIM(term) != '' ORDER BY 1";
         List<String> list = new ArrayList<>();
         try (Statement stmt = getConnection().createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {

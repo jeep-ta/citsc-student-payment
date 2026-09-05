@@ -15,6 +15,7 @@ public class ImportBatchFile {
     private String fileHash;
     private String receiptAcademicYear;
     private ChargeAcademicTerm receiptTerm = ChargeAcademicTerm.UNASSIGNED;
+    private java.time.LocalDate remittanceDate;
     private int totalRows;
     private int newRecords;
     private int duplicateRecords;
@@ -38,6 +39,7 @@ public class ImportBatchFile {
     public ChargeAcademicTerm getReceiptTerm() {
         return receiptTerm != null ? receiptTerm : ChargeAcademicTerm.UNASSIGNED;
     }
+    public java.time.LocalDate getRemittanceDate() { return remittanceDate; }
     public ReceiptKey getReceiptKey(int receiptNumber) {
         return new ReceiptKey(receiptNumber, receiptAcademicYear, getReceiptTerm());
     }
@@ -63,6 +65,7 @@ public class ImportBatchFile {
     public void setReceiptTerm(ChargeAcademicTerm receiptTerm) {
         this.receiptTerm = receiptTerm != null ? receiptTerm : ChargeAcademicTerm.UNASSIGNED;
     }
+    public void setRemittanceDate(java.time.LocalDate remittanceDate) { this.remittanceDate = remittanceDate; }
     public void setTotalRows(int totalRows) { this.totalRows = totalRows; }
     public void setNewRecords(int newRecords) { this.newRecords = newRecords; }
     public void setDuplicateRecords(int duplicateRecords) { this.duplicateRecords = duplicateRecords; }

@@ -743,7 +743,7 @@ public class PaymentPanel extends JPanel {
         if (!receiptText.isEmpty()) {
             try {
                 int receipt = Integer.parseInt(receiptText);
-                filters.add(RowFilter.numberFilter(RowFilter.ComparisonType.EQUAL, receipt, 1));
+                filters.add(RowFilter.regexFilter("^" + java.util.regex.Pattern.quote(String.valueOf(receipt)) + "$", 1));
             } catch (NumberFormatException ex) {
                 // Invalid number, ignore
             }
@@ -883,7 +883,7 @@ public class PaymentPanel extends JPanel {
             Payment p = payments.get(rowIndex);
             switch (columnIndex) {
                 case 0: return rowIndex + 1;
-                case 1: return p.getReceiptNumber();
+                case 1: return p.getReceiptDisplay();
                 case 2: return p.getStudentId() != null ? p.getStudentId() : "-";
                 case 3: return p.getName();
                 case 4: return p.getProgram() != null ? p.getProgram() : "-";
@@ -913,7 +913,7 @@ public class PaymentPanel extends JPanel {
 
         @Override
         public Class<?> getColumnClass(int columnIndex) {
-            if (columnIndex == 0 || columnIndex == 1) return Integer.class;
+            if (columnIndex == 0) return Integer.class;
             if (columnIndex >= 6 && columnIndex <= 9) return Double.class;
             if (columnIndex == 16) return Double.class;
             return String.class;

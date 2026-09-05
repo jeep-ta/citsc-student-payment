@@ -52,10 +52,12 @@ com\payment\ui\StudentPanel$2.class
 com\payment\StudentPaymentApp$2.class
 com\payment\ImportFileSelection.class
 com\payment\ui\PaymentPanel$StatusCellRenderer.class
+com\payment\ui\SettingsPanel$FeeRulesTableModel.class
 com\payment\ui\PaymentPanel$4.class
 com\payment\ui\PaymentPanel.class
 com\payment\DataManager$LocalDateTimeAdapter.class
 com\payment\ui\StudentPanel$CurrencyCellRenderer.class
+com\payment\FeeTermRule.class
 com\payment\ui\DashboardPanel$RecentImportsTableModel.class
 com\payment\ui\MergeStudentsDialog$2.class
 com\payment\ui\DashboardPanel$1.class

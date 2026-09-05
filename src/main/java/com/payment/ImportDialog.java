@@ -111,7 +111,7 @@ public class ImportDialog extends JDialog {
 
         // Remittance date
         gbc.gridx = 0; gbc.gridy = 1;
-        JLabel dateLbl = new JLabel("Remittance Date:");
+        JLabel dateLbl = new JLabel("Fallback Date:");
         dateLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
         panel.add(dateLbl, gbc);
 
@@ -249,6 +249,7 @@ public class ImportDialog extends JDialog {
         previewTable.getColumnModel().getColumn(8).setPreferredWidth(200);  // Details
         previewTable.getColumnModel().getColumn(9).setPreferredWidth(160);  // Source file
         previewTable.getColumnModel().getColumn(10).setPreferredWidth(170); // Receipt period
+        previewTable.getColumnModel().getColumn(11).setPreferredWidth(130); // Remittance date
 
         // Custom renderer for status column
         previewTable.getColumnModel().getColumn(5).setCellRenderer(new StatusCellRenderer());
@@ -670,7 +671,7 @@ public class ImportDialog extends JDialog {
     private static class PreviewTableModel extends AbstractTableModel {
         private static final String[] COLUMN_NAMES = {
             "Row", "Receipt #", "Student Name", "Program", "Amount", "Status",
-            "Charge Term", "Matched Student", "Details", "Source File", "Receipt Period"
+            "Charge Term", "Matched Student", "Details", "Source File", "Receipt Period", "Remittance Date"
         };
 
         private List<ImportPreviewItem> items;
@@ -712,7 +713,7 @@ public class ImportDialog extends JDialog {
 
             switch (columnIndex) {
                 case 0: return item.getRowNumber();
-                case 1: return item.getReceiptNumber();
+                case 1: return item.getReceiptDisplay();
                 case 2: return item.getStudentName();
                 case 3: return item.getProgram() != null ? item.getProgram() : "";
                 case 4: return String.format("₱%,.2f", item.getTotalAmount());
@@ -723,7 +724,9 @@ public class ImportDialog extends JDialog {
                     (item.getProposedStudentCode() != null ? item.getProposedStudentCode() + " (new)" : "");
                 case 8: return getDetails(item);
                 case 9: return item.getSourceFileName() != null ? item.getSourceFileName() : "";
-                case 10: return item.getReceiptKey().displayScope();
+                case 10: return item.getReceiptNumber() > 0
+                    ? item.getReceiptKey().displayScope() : "Not applicable";
+                case 11: return item.getRemittanceDate() != null ? item.getRemittanceDate().toString() : "";
                 default: return null;
             }
         }
@@ -757,12 +760,21 @@ public class ImportDialog extends JDialog {
             if (item.isDuplicate()) {
                 return "EXACT DUPLICATE - will be skipped";
             }
-            return "";
+            java.util.List<String> attributions = new java.util.ArrayList<>();
+            if (item.getIntelFee() != null && item.getIntelFee() > 0 && item.getIntelFeeTerm() != null)
+                attributions.add("Intel: " + item.getIntelFeeAy() + " / " + item.getIntelFeeTerm().getLabel());
+            if (item.getTshirtSizing() != null && item.getTshirtSizing() > 0 && item.getTshirtTerm() != null)
+                attributions.add("T-Shirt: " + item.getTshirtAy() + " / " + item.getTshirtTerm().getLabel());
+            if (item.getPenalties() != null && item.getPenalties() > 0 && item.getPenaltiesTerm() != null)
+                attributions.add("Penalties: " + item.getPenaltiesAy() + " / " + item.getPenaltiesTerm().getLabel());
+            if (item.getCitNight() != null && item.getCitNight() > 0 && item.getCitNightTerm() != null)
+                attributions.add("CIT: " + item.getCitNightAy() + " / " + item.getCitNightTerm().getLabel());
+            return String.join(" | ", attributions);
         }
 
         @Override
         public Class<?> getColumnClass(int columnIndex) {
-            if (columnIndex == 0 || columnIndex == 1) return Integer.class;
+            if (columnIndex == 0) return Integer.class;
             if (columnIndex == 6) return String.class;
             return String.class;
         }

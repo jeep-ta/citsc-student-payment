@@ -24,6 +24,15 @@ public class ExcelImporter {
 
             Sheet sheet = workbook.getSheetAt(0);
 
+            Map<String, Integer> headers = new HashMap<>();
+            Row headerRow = sheet.getRow(0);
+            if (headerRow != null) {
+                for (Cell cell : headerRow) {
+                    String header = getStringValue(cell).trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
+                    if (!header.isEmpty()) headers.put(header, cell.getColumnIndex());
+                }
+            }
+
             // Skip header row (row 0)
             for (int i = 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
@@ -41,6 +50,14 @@ public class ExcelImporter {
                 Cell receivedByCell = row.getCell(8);
                 Cell remarksCell = row.getCell(9);
                 Cell chargeTermCell = row.getCell(10); // Optional: CURRENT/PREVIOUS/UNASSIGNED
+                Cell intelTermCell = optionalCell(row, headers, 11, "intel fee term", "intel term");
+                Cell intelAyCell = optionalCell(row, headers, 12, "intel fee ay", "intel ay", "intel academic year");
+                Cell tshirtTermCell = optionalCell(row, headers, 13, "t shirt term", "tshirt term", "t shirt sizing term");
+                Cell tshirtAyCell = optionalCell(row, headers, 14, "t shirt ay", "tshirt ay", "t shirt academic year");
+                Cell penaltiesTermCell = optionalCell(row, headers, 15, "penalties term", "penalty term");
+                Cell penaltiesAyCell = optionalCell(row, headers, 16, "penalties ay", "penalty ay", "penalties academic year");
+                Cell citTermCell = optionalCell(row, headers, 17, "cit night term", "cit term");
+                Cell citAyCell = optionalCell(row, headers, 18, "cit night ay", "cit ay", "cit night academic year");
 
                 // Skip empty rows
                 if (nameCell == null || getStringValue(nameCell).trim().isEmpty()) {
@@ -80,6 +97,10 @@ public class ExcelImporter {
                         receivedBy, remarks);
                 payment.setRemittanceDate(remittanceDate);
                 payment.setChargeAcademicTerm(chargeTerm);
+                payment.setIntelFeeTerm(parseOptionalTerm(intelTermCell)); payment.setIntelFeeAy(getOptionalString(intelAyCell));
+                payment.setTshirtTerm(parseOptionalTerm(tshirtTermCell)); payment.setTshirtAy(getOptionalString(tshirtAyCell));
+                payment.setPenaltiesTerm(parseOptionalTerm(penaltiesTermCell)); payment.setPenaltiesAy(getOptionalString(penaltiesAyCell));
+                payment.setCitNightTerm(parseOptionalTerm(citTermCell)); payment.setCitNightAy(getOptionalString(citAyCell));
                 payment.setImportSourceFile(new File(filePath).getName());
                 payment.setImportSourceRow(i + 1);
                 student.addPayment(payment);
@@ -148,5 +169,23 @@ public class ExcelImporter {
             default:
                 return null;
         }
+    }
+
+    private static Cell optionalCell(Row row, Map<String, Integer> headers, int fallback, String... names) {
+        for (String name : names) {
+            Integer index = headers.get(name);
+            if (index != null) return row.getCell(index);
+        }
+        return row.getCell(fallback);
+    }
+
+    private static String getOptionalString(Cell cell) {
+        String value = getStringValue(cell).trim();
+        return value.isEmpty() ? null : value;
+    }
+
+    private static ChargeAcademicTerm parseOptionalTerm(Cell cell) {
+        String value = getOptionalString(cell);
+        return value == null ? null : ChargeAcademicTerm.fromCode(value);
     }
 }

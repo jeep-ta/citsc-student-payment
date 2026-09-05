@@ -3,6 +3,7 @@ package com.payment.ui;
 import com.payment.ChargeAcademicTerm;
 import com.payment.Payment;
 import com.payment.Student;
+import com.payment.FeeTermRule;
 import com.payment.database.DatabaseManager;
 
 import javax.swing.*;
@@ -11,6 +12,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +41,8 @@ public class SettingsPanel extends JPanel {
     private JLabel lastMigrationLabel;
     private JLabel studentCountLabel;
     private JLabel paymentCountLabel;
+    private FeeRulesTableModel feeRulesTableModel;
+    private JTable feeRulesTable;
 
     public SettingsPanel() {
         this.db = DatabaseManager.getInstance();
@@ -84,6 +88,9 @@ public class SettingsPanel extends JPanel {
         contentPanel.add(createSection("🎓 Academic Period & Current Term Declaration", ThemeUtils.NEON_CYAN, createAcademicPeriodSettings()));
         contentPanel.add(Box.createVerticalStrut(16));
 
+        contentPanel.add(createSection("Fee Category Date Rules", ThemeUtils.NEON_BLUE, createFeeRulesPanel()));
+        contentPanel.add(Box.createVerticalStrut(16));
+
         // 2. General Settings
         contentPanel.add(createSection("General Settings", ThemeUtils.NEON_PURPLE, createGeneralSettings()));
         contentPanel.add(Box.createVerticalStrut(16));
@@ -108,6 +115,96 @@ public class SettingsPanel extends JPanel {
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
         scrollPane.getViewport().setBackground(ThemeUtils.BG_DEEPEST);
         add(scrollPane, BorderLayout.CENTER);
+    }
+
+    private JPanel createFeeRulesPanel() {
+        JPanel panel = new JPanel(new BorderLayout(8, 8));
+        panel.setBackground(ThemeUtils.BG_CARD);
+        JLabel hint = new JLabel("Rules apply by remittance date and assign each fee independently; receipt issuance period is unchanged.");
+        hint.setForeground(ThemeUtils.TEXT_MUTED);
+        panel.add(hint, BorderLayout.NORTH);
+        feeRulesTableModel = new FeeRulesTableModel();
+        feeRulesTable = new JTable(feeRulesTableModel);
+        feeRulesTable.setRowHeight(22);
+        ThemeUtils.applyTableTheme(feeRulesTable);
+        panel.add(new JScrollPane(feeRulesTable), BorderLayout.CENTER);
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        buttons.setOpaque(false);
+        JButton add = new JButton("Add Rule"); ThemeUtils.styleButton(add, ThemeUtils.NEON_GREEN); add.addActionListener(e -> addFeeRule());
+        JButton edit = new JButton("Edit Selected"); ThemeUtils.styleButton(edit, ThemeUtils.NEON_CYAN); edit.addActionListener(e -> editFeeRule());
+        JButton remove = new JButton("Delete Selected"); ThemeUtils.styleButton(remove, ThemeUtils.NEON_ROSE); remove.addActionListener(e -> deleteFeeRule());
+        buttons.add(add); buttons.add(edit); buttons.add(remove);
+        panel.add(buttons, BorderLayout.SOUTH);
+        loadFeeRules();
+        return panel;
+    }
+
+    private void loadFeeRules() {
+        if (feeRulesTableModel == null) return;
+        try { feeRulesTableModel.setRules(db.getFeeTermRules()); }
+        catch (Exception e) { feeRulesTableModel.setRules(List.of()); }
+    }
+
+    private void addFeeRule() {
+        FeeTermRule rule = promptFeeRule(null);
+        if (rule == null) return;
+        try { db.insertFeeTermRule(rule); int count = db.refreshFeeTermAssignments(); loadFeeRules(); showRuleRefreshMessage(count); }
+        catch (Exception ex) { JOptionPane.showMessageDialog(this, ex.getMessage(), "Invalid Rule", JOptionPane.WARNING_MESSAGE); }
+    }
+
+    private void editFeeRule() {
+        int row = feeRulesTable == null ? -1 : feeRulesTable.getSelectedRow();
+        if (row < 0) return;
+        FeeTermRule original = feeRulesTableModel.getRules().get(feeRulesTable.convertRowIndexToModel(row));
+        FeeTermRule edited = promptFeeRule(original);
+        if (edited == null) return;
+        edited.setId(original.getId());
+        try { db.updateFeeTermRule(edited); int count = db.refreshFeeTermAssignments(); loadFeeRules(); showRuleRefreshMessage(count); }
+        catch (Exception ex) { JOptionPane.showMessageDialog(this, ex.getMessage(), "Invalid Rule", JOptionPane.WARNING_MESSAGE); }
+    }
+
+    private FeeTermRule promptFeeRule(FeeTermRule existing) {
+        JComboBox<String> category = new JComboBox<>(new String[]{FeeTermRule.INTEL_FEE, FeeTermRule.T_SHIRT, FeeTermRule.PENALTIES, FeeTermRule.CIT_NIGHT});
+        category.setSelectedItem(existing != null ? existing.getCategory() : FeeTermRule.PENALTIES);
+        JTextField start = new JTextField(existing != null ? existing.getStartDate().toString() : LocalDate.now().withDayOfMonth(1).toString());
+        JTextField end = new JTextField(existing != null ? existing.getEndDate().toString() : LocalDate.now().toString());
+        JTextField ay = new JTextField(existing != null ? existing.getAcademicYear() : (String) currentAyCombo.getSelectedItem());
+        JComboBox<ChargeAcademicTerm> term = new JComboBox<>(new ChargeAcademicTerm[]{ChargeAcademicTerm.FIRST_SEM, ChargeAcademicTerm.SECOND_SEM, ChargeAcademicTerm.SUMMER});
+        term.setSelectedItem(existing != null ? existing.getTerm() : ChargeAcademicTerm.FIRST_SEM);
+        JPanel form = new JPanel(new GridLayout(0, 2, 6, 6));
+        form.add(new JLabel("Fee category")); form.add(category); form.add(new JLabel("Start date (YYYY-MM-DD)")); form.add(start);
+        form.add(new JLabel("End date (YYYY-MM-DD)")); form.add(end); form.add(new JLabel("Academic year")); form.add(ay);
+        form.add(new JLabel("Term")); form.add(term);
+        if (JOptionPane.showConfirmDialog(this, form, existing == null ? "Add Fee Attribution Rule" : "Edit Fee Attribution Rule", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) return null;
+        try {
+            return new FeeTermRule((String) category.getSelectedItem(), LocalDate.parse(start.getText().trim()), LocalDate.parse(end.getText().trim()), ay.getText(), (ChargeAcademicTerm) term.getSelectedItem());
+        } catch (Exception ex) { JOptionPane.showMessageDialog(this, "Invalid date: " + ex.getMessage(), "Invalid Rule", JOptionPane.WARNING_MESSAGE); return null; }
+    }
+
+    private void deleteFeeRule() {
+        int row = feeRulesTable == null ? -1 : feeRulesTable.getSelectedRow();
+        if (row < 0) return;
+        FeeTermRule rule = feeRulesTableModel.getRules().get(feeRulesTable.convertRowIndexToModel(row));
+        try { if (db.deleteFeeTermRule(rule.getId())) { int count = db.refreshFeeTermAssignments(); loadFeeRules(); showRuleRefreshMessage(count); } }
+        catch (Exception e) { JOptionPane.showMessageDialog(this, e.getMessage(), "Delete Failed", JOptionPane.ERROR_MESSAGE); }
+    }
+
+    private void showRuleRefreshMessage(int count) {
+        JOptionPane.showMessageDialog(this,
+            count + " existing payment record(s) refreshed. New imports will use the updated rules automatically.",
+            "Fee Rules Updated", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private static class FeeRulesTableModel extends AbstractTableModel {
+        private final String[] columns = {"Category", "From", "To", "Academic Year", "Term", "Enabled"};
+        private List<FeeTermRule> rules = new java.util.ArrayList<>();
+        void setRules(List<FeeTermRule> value) { rules = new java.util.ArrayList<>(value); fireTableDataChanged(); }
+        List<FeeTermRule> getRules() { return rules; }
+        public int getRowCount() { return rules.size(); }
+        public int getColumnCount() { return columns.length; }
+        public String getColumnName(int c) { return columns[c]; }
+        public Object getValueAt(int r, int c) { FeeTermRule x = rules.get(r); return switch(c) {
+            case 0 -> x.getCategory(); case 1 -> x.getStartDate(); case 2 -> x.getEndDate(); case 3 -> x.getAcademicYear(); case 4 -> x.getTerm().getLabel(); case 5 -> x.isEnabled(); default -> ""; }; }
     }
 
     private JPanel createSection(String title, Color accentColor, JComponent content) {
@@ -599,7 +696,7 @@ public class SettingsPanel extends JPanel {
                 // Export payments
                 File paymentFile = new File(exportDir, "payments_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")) + ".csv");
                 try (var writer = new java.io.PrintWriter(paymentFile)) {
-                    writer.println("Receipt Number,Student ID,Name,Program,Intel Fee,T-Shirt,Penalties,CIT Night,Received By,Remarks,Remittance Date,Receipt Academic Year,Receipt Term,Charge Academic Year,Charge Term,Import Batch,Source File,Source Row,Status,Created At,Updated At");
+                    writer.println("Receipt Number,Student ID,Name,Program,Intel Fee,T-Shirt,Penalties,CIT Night,Received By,Remarks,Remittance Date,Receipt Academic Year,Receipt Term,Charge Academic Year,Charge Term,Intel Fee AY,Intel Fee Term,T-Shirt AY,T-Shirt Term,Penalties AY,Penalties Term,CIT Night AY,CIT Night Term,Import Batch,Source File,Source Row,Status,Created At,Updated At");
                     List<Payment> payments = db.getAllPayments();
                     DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
                     for (Payment p : payments) {
@@ -619,6 +716,10 @@ public class SettingsPanel extends JPanel {
                             escapeCsv(p.getReceiptTermCode()),
                             escapeCsv(p.getAcademicYear()),
                             escapeCsv(p.getChargeAcademicTermCode()),
+                            escapeCsv(p.getIntelFeeAy()), escapeCsv(p.getIntelFeeTerm() != null ? p.getIntelFeeTerm().getCode() : ""),
+                            escapeCsv(p.getTshirtAy()), escapeCsv(p.getTshirtTerm() != null ? p.getTshirtTerm().getCode() : ""),
+                            escapeCsv(p.getPenaltiesAy()), escapeCsv(p.getPenaltiesTerm() != null ? p.getPenaltiesTerm().getCode() : ""),
+                            escapeCsv(p.getCitNightAy()), escapeCsv(p.getCitNightTerm() != null ? p.getCitNightTerm().getCode() : ""),
                             escapeCsv(p.getImportBatchCode()),
                             escapeCsv(p.getImportSourceFile()),
                             p.getImportSourceRow() != null ? String.valueOf(p.getImportSourceRow()) : "",

@@ -308,7 +308,7 @@ public class DataQualityPanel extends JPanel {
 
                 // 3. Check for invalid payment records
                 for (Payment p : payments) {
-                    if (!p.getReceiptKey().hasDefinedScope()) {
+                    if (p.getReceiptNumber() > 0 && !p.getReceiptKey().hasDefinedScope()) {
                         issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Missing Receipt Period", "PAYMENT",
                             String.valueOf(p.getId()),
                             String.format("Receipt %d has no issuance academic year/semester", p.getReceiptNumber()), "OPEN"));
@@ -353,11 +353,16 @@ public class DataQualityPanel extends JPanel {
                             String.valueOf(p.getId()),
                             String.format("Receipt %d has no remittance date", p.getReceiptNumber()), "OPEN"));
                     }
-                    if (ChargeAcademicTerm.isTermEligibleCategory(p.getCitNight(), p.getPenalties()) &&
-                        (p.getChargeAcademicTerm() == null || p.getChargeAcademicTerm() == ChargeAcademicTerm.UNASSIGNED)) {
-                        issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Unassigned Charge Term", "PAYMENT",
-                            String.valueOf(p.getId()),
-                            String.format("Receipt %d has CIT Night/Penalty amount but UNASSIGNED charge term", p.getReceiptNumber()), "OPEN"));
+                    String[] categories = {"Intel Fee", "T-Shirt", "Penalties", "CIT Night"};
+                    Double[] amounts = {p.getIntelFee(), p.getTshirtSizing(), p.getPenalties(), p.getCitNight()};
+                    for (int i = 0; i < categories.length; i++) {
+                        if (amounts[i] == null || amounts[i] <= 0) continue;
+                        if (p.getEffectiveTermForCategory(categories[i]) == ChargeAcademicTerm.UNASSIGNED
+                            || p.getEffectiveAyForCategory(categories[i]) == null) {
+                            issues.add(new QualityIssue(QualityIssue.Severity.WARNING, "Unassigned Fee Attribution", "PAYMENT",
+                                String.valueOf(p.getId()),
+                                String.format("Receipt %d has %s without a complete academic year/term tag", p.getReceiptNumber(), categories[i]), "OPEN"));
+                        }
                     }
                 }
 

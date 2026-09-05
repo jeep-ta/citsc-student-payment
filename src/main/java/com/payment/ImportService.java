@@ -9,13 +9,27 @@ import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Import Service handles the full import workflow:
  * Parse → Validate → Normalize → Match → Detect conflicts → Preview → Commit
  */
 public class ImportService {
+
+    private static final Pattern PAYMENT_IMPORT_FILENAME = Pattern.compile(
+        "^Payment\\s+Import\\s+(.+?)\\s*$", Pattern.CASE_INSENSITIVE);
+    private static final List<DateTimeFormatter> IMPORT_FILENAME_DATE_FORMATS = List.of(
+        new DateTimeFormatterBuilder().parseCaseInsensitive()
+            .appendPattern("MMMM d, uuuu").toFormatter(Locale.ENGLISH),
+        new DateTimeFormatterBuilder().parseCaseInsensitive()
+            .appendPattern("MMM d, uuuu").toFormatter(Locale.ENGLISH)
+    );
 
     private final DatabaseManager db;
     private final AuditService auditService;
@@ -80,10 +94,6 @@ public class ImportService {
             if (selection == null || selection.filePath() == null || selection.filePath().isBlank()) {
                 throw new IllegalArgumentException("Every spreadsheet must have a valid file path");
             }
-            if (!selection.getReceiptKey(1).hasDefinedScope()) {
-                throw new IllegalArgumentException("Receipt academic year and semester are required for " +
-                    new File(selection.filePath()).getName());
-            }
         }
 
         List<ImportPreviewItem> previewItems = new ArrayList<>();
@@ -91,6 +101,12 @@ public class ImportService {
 
         ChargeAcademicTerm activeTerm = db.getCurrentAcademicTerm();
         boolean autoAssign = db.isAutoAssignCurrentTerm();
+        List<FeeTermRule> feeTermRules;
+        try {
+            feeTermRules = db.getFeeTermRules();
+        } catch (java.sql.SQLException e) {
+            throw new IOException("Could not load fee attribution rules: " + e.getMessage(), e);
+        }
 
         for (ImportFileSelection selection : selections) {
             String filePath = selection.filePath();
@@ -99,13 +115,17 @@ public class ImportService {
             ImportBatchFile batchFile = new ImportBatchFile(sourceFile.getName(), "UNAVAILABLE");
             batchFile.setReceiptAcademicYear(fileScope.academicYear());
             batchFile.setReceiptTerm(fileScope.term());
+            LocalDate fileRemittanceDate = parseRemittanceDateFromFilename(sourceFile.getName())
+                .orElse(remittanceDate);
+            batchFile.setRemittanceDate(fileRemittanceDate);
             batchFiles.add(batchFile);
             try {
                 batchFile.setFileHash(sha256(sourceFile));
 
-                List<Student> parsedStudents = ExcelImporter.importFromExcel(filePath, remittanceDate);
+                List<Student> parsedStudents = ExcelImporter.importFromExcel(filePath, fileRemittanceDate);
                 for (Student parsedStudent : parsedStudents) {
                     for (Payment payment : parsedStudent.getPayments()) {
+                        applyFeeTermRules(payment, feeTermRules);
                         int sourceRow = payment.getImportSourceRow() != null
                             ? payment.getImportSourceRow() : 0;
                         ImportPreviewItem item = new ImportPreviewItem(
@@ -132,6 +152,11 @@ public class ImportService {
                         } else {
                             item.setChargeAcademicTerm(payment.getChargeAcademicTerm());
                         }
+                        item.setAcademicYear(payment.getAcademicYear());
+                        item.setIntelFeeTerm(payment.getIntelFeeTerm()); item.setIntelFeeAy(payment.getIntelFeeAy());
+                        item.setTshirtTerm(payment.getTshirtTerm()); item.setTshirtAy(payment.getTshirtAy());
+                        item.setPenaltiesTerm(payment.getPenaltiesTerm()); item.setPenaltiesAy(payment.getPenaltiesAy());
+                        item.setCitNightTerm(payment.getCitNightTerm()); item.setCitNightAy(payment.getCitNightAy());
                         previewItems.add(item);
                     }
                 }
@@ -169,6 +194,12 @@ public class ImportService {
             batch.setReceiptAcademicYear(null);
             batch.setReceiptTerm(ChargeAcademicTerm.UNASSIGNED);
         }
+        Set<LocalDate> remittanceDates = batchFiles.stream()
+            .map(ImportBatchFile::getRemittanceDate)
+            .filter(Objects::nonNull)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        batch.setRemittanceDate(remittanceDates.size() == 1
+            ? remittanceDates.iterator().next() : null);
         batch.setImportedAt(LocalDateTime.now());
         batch.setTotalRows(previewItems.size());
         batch.setNewRecords((int) previewItems.stream().filter(ImportPreviewItem::isNew).count());
@@ -183,6 +214,26 @@ public class ImportService {
 
     private static ChargeAcademicTerm concreteReceiptTerm(ChargeAcademicTerm term) {
         return ReceiptKey.isConcreteTerm(term) ? term : ChargeAcademicTerm.FIRST_SEM;
+    }
+
+    /** Parse filenames such as "Payment Import August 31, 2025.xlsx". */
+    public static Optional<LocalDate> parseRemittanceDateFromFilename(String filename) {
+        if (filename == null || filename.isBlank()) return Optional.empty();
+        String baseName = new File(filename).getName();
+        int extension = baseName.lastIndexOf('.');
+        if (extension > 0) baseName = baseName.substring(0, extension);
+
+        Matcher matcher = PAYMENT_IMPORT_FILENAME.matcher(baseName.trim());
+        if (!matcher.matches()) return Optional.empty();
+        String dateText = matcher.group(1).trim();
+        for (DateTimeFormatter formatter : IMPORT_FILENAME_DATE_FORMATS) {
+            try {
+                return Optional.of(LocalDate.parse(dateText, formatter));
+            } catch (DateTimeParseException ignored) {
+                // Try the alternate month format.
+            }
+        }
+        return Optional.empty();
     }
 
     private static String sha256(File file) throws Exception {
@@ -206,7 +257,7 @@ public class ImportService {
             if (item.isError()) continue;
 
             // Validate receipt number
-            if (item.getReceiptNumber() <= 0) {
+            if (item.getReceiptNumber() < 0) {
                 item.setStatus(ImportPreviewItem.STATUS_ERROR);
                 item.setErrorMessage("Invalid receipt number: " + item.getReceiptNumber());
                 continue;
@@ -219,7 +270,7 @@ public class ImportService {
                 continue;
             }
 
-            if (!item.getReceiptKey().hasDefinedScope()) {
+            if (item.getReceiptNumber() > 0 && !item.getReceiptKey().hasDefinedScope()) {
                 item.setStatus(ImportPreviewItem.STATUS_ERROR);
                 item.setErrorMessage("Receipt academic year and semester are required");
                 continue;
@@ -246,7 +297,8 @@ public class ImportService {
         int nextStudentSequence = snapshot.maxStudentSequence();
 
         for (ImportPreviewItem item : validItems) {
-            Payment existing = snapshot.paymentsByReceipt().get(item.getReceiptKey());
+            Payment existing = item.getReceiptNumber() > 0
+                ? snapshot.paymentsByReceipt().get(item.getReceiptKey()) : null;
 
             if (existing != null) {
                 if (isExactDuplicate(item, existing, snapshot.autoAssign(), snapshot.academicYear())) {
@@ -262,7 +314,8 @@ public class ImportService {
                 continue;
             }
 
-            ImportPreviewItem firstItem = firstItemsByReceipt.get(item.getReceiptKey());
+            ImportPreviewItem firstItem = item.getReceiptNumber() > 0
+                ? firstItemsByReceipt.get(item.getReceiptKey()) : null;
             if (firstItem != null) {
                 Payment firstPayment = paymentFromItem(firstItem);
                 Payment currentPayment = paymentFromItem(item);
@@ -302,7 +355,9 @@ public class ImportService {
                 item.setStatus(ImportPreviewItem.STATUS_AMBIGUOUS);
                 item.setAmbiguousMatches(matches);
             }
-            firstItemsByReceipt.put(item.getReceiptKey(), item);
+            if (item.getReceiptNumber() > 0) {
+                firstItemsByReceipt.put(item.getReceiptKey(), item);
+            }
         }
     }
 
@@ -314,6 +369,7 @@ public class ImportService {
         }
 
         Map<ReceiptKey, List<ImportPreviewItem>> itemsByPeriod = items.stream()
+            .filter(item -> item.getReceiptNumber() > 0)
             .collect(java.util.stream.Collectors.groupingBy(
                 item -> new ReceiptKey(1, item.getReceiptAcademicYear(), item.getReceiptTerm()),
                 LinkedHashMap::new,
@@ -399,9 +455,33 @@ public class ImportService {
         );
         payment.setRemittanceDate(item.getRemittanceDate());
         payment.setChargeAcademicTerm(item.getChargeAcademicTerm());
+        payment.setAcademicYear(item.getAcademicYear());
+        payment.setIntelFeeTerm(item.getIntelFeeTerm()); payment.setIntelFeeAy(item.getIntelFeeAy());
+        payment.setTshirtTerm(item.getTshirtTerm()); payment.setTshirtAy(item.getTshirtAy());
+        payment.setPenaltiesTerm(item.getPenaltiesTerm()); payment.setPenaltiesAy(item.getPenaltiesAy());
+        payment.setCitNightTerm(item.getCitNightTerm()); payment.setCitNightAy(item.getCitNightAy());
         payment.setReceiptAcademicYear(item.getReceiptAcademicYear());
         payment.setReceiptTerm(item.getReceiptTerm());
         return payment;
+    }
+
+    /** Apply the first matching active rule for each populated fee category. */
+    private static void applyFeeTermRules(Payment payment, List<FeeTermRule> rules) {
+        if (payment == null || rules == null || rules.isEmpty()) return;
+        LocalDate date = payment.getRemittanceDate();
+        for (FeeTermRule rule : rules) {
+            if (!rule.matches(date)) continue;
+            String category = rule.getCategory();
+            boolean populated = (FeeTermRule.INTEL_FEE.equals(category) && payment.getIntelFee() != null && payment.getIntelFee() > 0)
+                || (FeeTermRule.T_SHIRT.equals(category) && payment.getTshirtSizing() != null && payment.getTshirtSizing() > 0)
+                || (FeeTermRule.PENALTIES.equals(category) && payment.getPenalties() != null && payment.getPenalties() > 0)
+                || (FeeTermRule.CIT_NIGHT.equals(category) && payment.getCitNight() != null && payment.getCitNight() > 0);
+            if (!populated) continue;
+            ChargeAcademicTerm existingTerm = payment.getEffectiveTermForCategory(category);
+            String existingAy = payment.getEffectiveAyForCategory(category);
+            boolean explicitlyAssigned = existingTerm != null && existingTerm != ChargeAcademicTerm.UNASSIGNED && existingAy != null && !existingAy.isBlank();
+            if (!explicitlyAssigned) payment.setCategoryAttribution(category, rule.getTerm(), rule.getAcademicYear());
+        }
     }
 
     private void updateFileSummaries(List<ImportPreviewItem> items, List<ImportBatchFile> files) {
@@ -536,13 +616,20 @@ public class ImportService {
                     payment.setStatus(Payment.STATUS_ACTIVE);
                     // Set charge academic term from preview item
                     payment.setChargeAcademicTerm(item.getChargeAcademicTerm());
+                    payment.setAcademicYear(item.getAcademicYear());
+                    payment.setIntelFeeTerm(item.getIntelFeeTerm()); payment.setIntelFeeAy(item.getIntelFeeAy());
+                    payment.setTshirtTerm(item.getTshirtTerm()); payment.setTshirtAy(item.getTshirtAy());
+                    payment.setPenaltiesTerm(item.getPenaltiesTerm()); payment.setPenaltiesAy(item.getPenaltiesAy());
+                    payment.setCitNightTerm(item.getCitNightTerm()); payment.setCitNightAy(item.getCitNightAy());
                     payment.setReceiptAcademicYear(item.getReceiptAcademicYear());
                     payment.setReceiptTerm(item.getReceiptTerm());
                     payment.setImportBatchCode(batch.getBatchCode());
                     payment.setImportSourceFile(item.getSourceFileName());
                     payment.setImportSourceRow(item.getRowNumber());
                     if (autoAssign) {
-                        payment.setAcademicYear(currentAcademicYear);
+                        if (payment.getAcademicYear() == null || payment.getAcademicYear().isBlank()) {
+                            payment.setAcademicYear(currentAcademicYear);
+                        }
                     }
                     db.insertPayment(payment);
 

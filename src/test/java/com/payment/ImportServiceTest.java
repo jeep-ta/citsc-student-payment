@@ -140,6 +140,15 @@ public class ImportServiceTest {
 
     @Test
     @Order(2)
+    void testPaymentImportFilenameSuppliesRemittanceDate() {
+        assertEquals(LocalDate.of(2025, 8, 31),
+            ImportService.parseRemittanceDateFromFilename(
+                "Payment Import August 31, 2025.xlsx").orElseThrow());
+        assertTrue(ImportService.parseRemittanceDateFromFilename("other_file.xlsx").isEmpty());
+    }
+
+    @Test
+    @Order(3)
     void testCommitImport_NewStudents() throws Exception {
         ImportPreviewResult preview = importService.generatePreview(testFile, LocalDate.now(), "testuser");
         ImportResult result = importService.commitImport(preview);
@@ -168,7 +177,7 @@ public class ImportServiceTest {
     }
 
     @Test
-    @Order(3)
+    @Order(4)
     void testImportDuplicateReceipt() throws Exception {
         // First import
         ImportPreviewResult preview1 = importService.generatePreview(testFile, LocalDate.now(), "testuser");
@@ -192,7 +201,7 @@ public class ImportServiceTest {
     }
 
     @Test
-    @Order(4)
+    @Order(5)
     void testImportConflictReceipt() throws Exception {
         // First import
         ImportPreviewResult preview1 = importService.generatePreview(testFile, LocalDate.now(), "testuser");
@@ -269,7 +278,7 @@ public class ImportServiceTest {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     void testImportAmbiguousStudents() throws Exception {
         // First, add two students with same normalized name
         Student s1 = new Student("Smith, John");
@@ -300,7 +309,7 @@ public class ImportServiceTest {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     void testPreviewAllocatesStableUniqueCodesAfterCurrentMaximum() throws Exception {
         Student existing = new Student("Existing, Student");
         existing.setStudentCode("STU-000125");
@@ -323,7 +332,7 @@ public class ImportServiceTest {
     }
 
     @Test
-    @Order(7)
+    @Order(8)
     void testReceiptNumbersCanRepeatAcrossSemestersButNotWithinSemester() throws Exception {
         ImportPreviewResult firstSemester = importService.generatePreview(
             List.of(testFile), LocalDate.now(), "testuser", "2026-2027", ChargeAcademicTerm.FIRST_SEM);
@@ -358,7 +367,7 @@ public class ImportServiceTest {
     }
 
     @Test
-    @Order(8)
+    @Order(9)
     void testMultipleSpreadsheetsCommitAsOneBatchWithFileProvenance() throws Exception {
         String secondFile = createSingleRowExcelFile(
             "test_import_second.xlsx", 10001, "Batch, Student Two", 275.0);
@@ -405,7 +414,7 @@ public class ImportServiceTest {
     }
 
     @Test
-    @Order(9)
+    @Order(10)
     void testMultipleSpreadsheetCommitRollsBackAsOneTransaction() throws Exception {
         String secondFile = createSingleRowExcelFile(
             "test_import_atomic.xlsx", 30001, "Atomic, Student", 325.0);
@@ -440,6 +449,26 @@ public class ImportServiceTest {
         }
     }
 
+    @Test
+    @Order(11)
+    void testReceiptlessRemittancesAreImportedWithoutReceiptIntegrityChecks() throws Exception {
+        String receiptlessFile = createReceiptlessExcelFile();
+        try {
+            ImportPreviewResult preview = importService.generateBatchPreview(
+                List.of(new ImportFileSelection(receiptlessFile, null, ChargeAcademicTerm.UNASSIGNED)),
+                LocalDate.now(), "testuser");
+            assertEquals(2, preview.getNewCount());
+            assertTrue(preview.getItems().stream().allMatch(item -> item.getReceiptNumber() == 0));
+
+            importService.commitImport(preview);
+
+            assertEquals(2, db.getAllPayments().size());
+            assertTrue(db.getAllPayments().stream().allMatch(payment -> payment.getReceiptNumber() == 0));
+        } finally {
+            new File(receiptlessFile).delete();
+        }
+    }
+
     private String createSingleRowExcelFile(String fileName, int receiptNumber,
                                             String studentName, double intelFee) throws IOException {
         try (Workbook wb = new XSSFWorkbook();
@@ -460,6 +489,28 @@ public class ImportServiceTest {
             row.createCell(7).setCellValue(0);
             row.createCell(8).setCellValue("Admin");
             row.createCell(9).setCellValue("Multi-file batch test");
+            wb.write(fos);
+        }
+        return fileName;
+    }
+
+    private String createReceiptlessExcelFile() throws IOException {
+        String fileName = "receiptless_import.xlsx";
+        try (Workbook wb = new XSSFWorkbook();
+             FileOutputStream fos = new FileOutputStream(fileName)) {
+            Sheet sheet = wb.createSheet("Payments");
+            Row header = sheet.createRow(0);
+            String[] headers = {"#", "Receipt #", "Name", "Program", "Intel Fee", "Tshirt Sizing", "Penalties", "CIT Night", "Received by", "Remarks"};
+            for (int i = 0; i < headers.length; i++) header.createCell(i).setCellValue(headers[i]);
+            for (int rowIndex = 1; rowIndex <= 2; rowIndex++) {
+                Row row = sheet.createRow(rowIndex);
+                row.createCell(0).setCellValue(rowIndex);
+                row.createCell(2).setCellValue("Accounting Recovery " + rowIndex);
+                row.createCell(3).setCellValue("CS-1");
+                row.createCell(4).setCellValue(100.0 * rowIndex);
+                row.createCell(8).setCellValue("University Accounting");
+                row.createCell(9).setCellValue("Remitted without receipt");
+            }
             wb.write(fos);
         }
         return fileName;

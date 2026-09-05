@@ -28,6 +28,9 @@ public class ImportPreviewItem {
     private String remarks;
     private LocalDate remittanceDate;
     private ChargeAcademicTerm chargeAcademicTerm; // Academic term for CIT Night/Penalty charges
+    private String academicYear;
+    private ChargeAcademicTerm intelFeeTerm, tshirtTerm, penaltiesTerm, citNightTerm;
+    private String intelFeeAy, tshirtAy, penaltiesAy, citNightAy;
     private String receiptAcademicYear;
     private ChargeAcademicTerm receiptTerm;
     private String sourceFileName;
@@ -68,6 +71,7 @@ public class ImportPreviewItem {
     // --- Getters ---
     public int getRowNumber() { return rowNumber; }
     public int getReceiptNumber() { return receiptNumber; }
+    public String getReceiptDisplay() { return receiptNumber > 0 ? "#" + receiptNumber : "No receipt"; }
     public String getStudentName() { return studentName; }
     public String getProgram() { return program; }
     public Double getIntelFee() { return intelFee; }
@@ -93,6 +97,15 @@ public class ImportPreviewItem {
     public String getErrorMessage() { return errorMessage; }
     public String getProposedStudentCode() { return proposedStudentCode; }
     public ChargeAcademicTerm getChargeAcademicTerm() { return chargeAcademicTerm != null ? chargeAcademicTerm : ChargeAcademicTerm.UNASSIGNED; }
+    public String getAcademicYear() { return academicYear; }
+    public ChargeAcademicTerm getIntelFeeTerm() { return intelFeeTerm; }
+    public String getIntelFeeAy() { return intelFeeAy; }
+    public ChargeAcademicTerm getTshirtTerm() { return tshirtTerm; }
+    public String getTshirtAy() { return tshirtAy; }
+    public ChargeAcademicTerm getPenaltiesTerm() { return penaltiesTerm; }
+    public String getPenaltiesAy() { return penaltiesAy; }
+    public ChargeAcademicTerm getCitNightTerm() { return citNightTerm; }
+    public String getCitNightAy() { return citNightAy; }
 
     // --- Setters ---
     public void setRowNumber(int rowNumber) { this.rowNumber = rowNumber; }
@@ -121,6 +134,15 @@ public class ImportPreviewItem {
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
     public void setProposedStudentCode(String proposedStudentCode) { this.proposedStudentCode = proposedStudentCode; }
     public void setChargeAcademicTerm(ChargeAcademicTerm chargeAcademicTerm) { this.chargeAcademicTerm = chargeAcademicTerm != null ? chargeAcademicTerm : ChargeAcademicTerm.UNASSIGNED; }
+    public void setAcademicYear(String academicYear) { this.academicYear = academicYear == null || academicYear.isBlank() ? null : academicYear.trim(); }
+    public void setIntelFeeTerm(ChargeAcademicTerm value) { this.intelFeeTerm = value; }
+    public void setIntelFeeAy(String value) { this.intelFeeAy = value == null || value.isBlank() ? null : value.trim(); }
+    public void setTshirtTerm(ChargeAcademicTerm value) { this.tshirtTerm = value; }
+    public void setTshirtAy(String value) { this.tshirtAy = value == null || value.isBlank() ? null : value.trim(); }
+    public void setPenaltiesTerm(ChargeAcademicTerm value) { this.penaltiesTerm = value; }
+    public void setPenaltiesAy(String value) { this.penaltiesAy = value == null || value.isBlank() ? null : value.trim(); }
+    public void setCitNightTerm(ChargeAcademicTerm value) { this.citNightTerm = value; }
+    public void setCitNightAy(String value) { this.citNightAy = value == null || value.isBlank() ? null : value.trim(); }
 
     // --- Helpers ---
     public boolean isNew() { return STATUS_NEW.equals(status); }

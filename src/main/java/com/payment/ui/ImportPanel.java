@@ -147,8 +147,10 @@ public class ImportPanel extends JPanel {
         StringBuilder fileDetails = new StringBuilder();
         try {
             for (ImportBatchFile file : db.getImportBatchFiles(batch.getBatchCode())) {
-                fileDetails.append(String.format("\n  • %s [%s] — %d rows, %d new, %d duplicate, %d conflict, %d error",
-                    file.getFileName(), file.getReceiptPeriodDisplay(), file.getTotalRows(), file.getNewRecords(),
+                fileDetails.append(String.format("\n  • %s [%s; %s] — %d rows, %d new, %d duplicate, %d conflict, %d error",
+                    file.getFileName(), file.getReceiptPeriodDisplay(),
+                    file.getRemittanceDate() != null ? file.getRemittanceDate() : "date unavailable",
+                    file.getTotalRows(), file.getNewRecords(),
                     file.getDuplicateRecords(), file.getConflictRecords(), file.getErrorRecords()));
             }
         } catch (Exception ignored) {
@@ -176,7 +178,7 @@ public class ImportPanel extends JPanel {
             batch.getReceiptPeriodDisplay(),
             batch.getImportedBy(),
             batch.getImportedAt() != null ? batch.getImportedAt().format(DateTimeFormatter.ofPattern("MMM dd, yyyy HH:mm")) : "-",
-            batch.getRemittanceDate() != null ? batch.getRemittanceDate().format(DateTimeFormatter.ofPattern("MMM dd, yyyy")) : "-",
+            batch.getRemittanceDateDisplay(),
             batch.getTotalRows(),
             batch.getNewRecords(),
             batch.getDuplicateRecords(),
@@ -221,7 +223,7 @@ public class ImportPanel extends JPanel {
                 case 2: return b.getFileCount();
                 case 3: return b.getReceiptPeriodDisplay();
                 case 4: return b.getImportedAt() != null ? b.getImportedAt().format(dateFormat) : "-";
-                case 5: return b.getRemittanceDate() != null ? b.getRemittanceDate().format(remittanceFormat) : "-";
+                case 5: return b.getRemittanceDateDisplay();
                 case 6: return b.getTotalRows();
                 case 7: return b.getNewRecords();
                 case 8: return b.getDuplicateRecords();

@@ -80,6 +80,10 @@ public class ImportBatch {
         if (key.hasDefinedScope()) return key.displayScope();
         return fileCount > 1 ? "Multiple periods" : "Unassigned";
     }
+    public String getRemittanceDateDisplay() {
+        return remittanceDate != null ? remittanceDate.toString()
+            : (fileCount > 1 ? "Per file (from filename)" : "Unassigned");
+    }
 
     public LocalDate getRemittanceDate() {
         return remittanceDate;

@@ -320,6 +320,12 @@ public class ReportsPanel extends JPanel {
 
             @Override
             protected Void doInBackground() throws Exception {
+                // Keep term-based reports synchronized with the declarations
+                // currently stored in Settings, including payments imported
+                // before a rule was added or edited.
+                if (reportType.contains("Student Payment Report") || reportType.contains("Academic Term Report")) {
+                    db.refreshFeeTermAssignments();
+                }
                 if (reportType.contains("Student Payment Report")) {
                     data = generateStudentPaymentReportSeparatedByTerm();
                     columns = new String[]{"Academic Year", "Term", "Student Code", "Name", "Program", "Receipt #", "Receipt AY", "Receipt Term", "Date", "Intel Fee", "T-Shirt", "Penalties", "CIT Night", "Received By", "Term Total"};
@@ -409,6 +415,7 @@ public class ReportsPanel extends JPanel {
         final String fTerm = (selectedTerm != null && !"All Terms".equals(selectedTerm)) ? selectedTerm : null;
 
         List<Map<String, Object>> records = new ArrayList<>();
+        Set<String> emittedReceiptKeys = new HashSet<>();
 
         for (Payment p : payments) {
             if (!"ACTIVE".equals(p.getStatus())) continue;
@@ -476,20 +483,28 @@ public class ReportsPanel extends JPanel {
                 FeeSplit fs = entry.getValue();
                 double termSubtotal = fs.intelFee + fs.tshirt + fs.penalties + fs.citNight;
 
+                // Keep each term split as its own payment line.  Amounts from
+                // other terms are deliberately null (rendered blank), never
+                // zero-valued, so they cannot be mistaken for collections in
+                // the requested term.  Receipt metadata is shown once when a
+                // receipt produces multiple term lines.
+                String receiptKey = p.getReceiptKey().toString();
+                boolean firstReceiptLine = emittedReceiptKeys.add(receiptKey);
+
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("Academic Year", termAy);
                 row.put("Term", termName);
                 row.put("Student Code", p.getStudentId() != null ? p.getStudentId() : "-");
                 row.put("Name", p.getName());
                 row.put("Program", p.getProgram() != null ? p.getProgram() : "-");
-                row.put("Receipt #", p.getReceiptNumber());
-                row.put("Receipt AY", p.getReceiptAcademicYear() != null ? p.getReceiptAcademicYear() : "-");
-                row.put("Receipt Term", p.getReceiptTerm().getLabel());
+                row.put("Receipt #", firstReceiptLine ? p.getReceiptNumber() : "");
+                row.put("Receipt AY", firstReceiptLine ? (p.getReceiptAcademicYear() != null ? p.getReceiptAcademicYear() : "-") : "");
+                row.put("Receipt Term", firstReceiptLine ? p.getReceiptTerm().getLabel() : "");
                 row.put("Date", p.getRemittanceDate() != null ? p.getRemittanceDate().format(fmt) : "-");
-                row.put("Intel Fee", fs.intelFee);
-                row.put("T-Shirt", fs.tshirt);
-                row.put("Penalties", fs.penalties);
-                row.put("CIT Night", fs.citNight);
+                row.put("Intel Fee", fs.intelFee > 0 ? fs.intelFee : null);
+                row.put("T-Shirt", fs.tshirt > 0 ? fs.tshirt : null);
+                row.put("Penalties", fs.penalties > 0 ? fs.penalties : null);
+                row.put("CIT Night", fs.citNight > 0 ? fs.citNight : null);
                 row.put("Received By", p.getReceivedBy() != null ? p.getReceivedBy() : "-");
                 row.put("Term Total", termSubtotal);
                 records.add(row);
@@ -710,7 +725,7 @@ public class ReportsPanel extends JPanel {
                 row.put("Files", b.getFileCount());
                 row.put("Receipt Period", b.getReceiptPeriodDisplay());
                 row.put("Imported At", b.getImportedAt() != null ? b.getImportedAt().format(fmt) : "-");
-                row.put("Remittance Date", b.getRemittanceDate() != null ? b.getRemittanceDate().format(remFmt) : "-");
+                row.put("Remittance Date", b.getRemittanceDateDisplay());
                 row.put("Records", b.getTotalRows());
                 row.put("New", b.getNewRecords());
                 row.put("Duplicates", b.getDuplicateRecords());
@@ -914,7 +929,7 @@ public class ReportsPanel extends JPanel {
             if (value instanceof Number num) {
                 setText(format.format(num.doubleValue()));
             } else if (value == null) {
-                setText("₱0.00");
+                setText("");
             }
 
             if (isSelected) {

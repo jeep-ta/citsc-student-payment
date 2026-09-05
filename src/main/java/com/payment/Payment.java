@@ -8,7 +8,7 @@ public class Payment {
     public static final String STATUS_VOID = "VOID";
 
     private int id;                   // Database primary key
-    private int receiptNumber;
+    private int receiptNumber;        // 0 means this remittance has no receipt
     private String name;              // Denormalized student name at creation time
     private String studentId;         // FK to Student.studentCode (internal record number)
     private String program;
@@ -90,6 +90,11 @@ public class Payment {
 
     public int getReceiptNumber() {
         return receiptNumber;
+    }
+
+    /** Display label that makes a legitimate receipt-less remittance explicit. */
+    public String getReceiptDisplay() {
+        return receiptNumber > 0 ? "#" + receiptNumber : "No receipt";
     }
 
     public String getName() {
@@ -264,6 +269,15 @@ public class Payment {
         return academicYear != null && !academicYear.trim().isEmpty() ? academicYear.trim() : null;
     }
 
+    /** Apply a resolved attribution to one fee category without changing the receipt scope. */
+    public void setCategoryAttribution(String category, ChargeAcademicTerm term, String ay) {
+        String normalized = FeeTermRule.normalizeCategory(category);
+        if (FeeTermRule.INTEL_FEE.equals(normalized)) { setIntelFeeTerm(term); setIntelFeeAy(ay); }
+        else if (FeeTermRule.T_SHIRT.equals(normalized)) { setTshirtTerm(term); setTshirtAy(ay); }
+        else if (FeeTermRule.PENALTIES.equals(normalized)) { setPenaltiesTerm(term); setPenaltiesAy(ay); }
+        else if (FeeTermRule.CIT_NIGHT.equals(normalized)) { setCitNightTerm(term); setCitNightAy(ay); }
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -400,7 +414,15 @@ public class Payment {
             && equalsNullable(remarks, other.remarks)
             && equalsNullable(remittanceDate, other.remittanceDate)
             && equalsNullable(chargeAcademicTerm, other.chargeAcademicTerm)
-            && equalsNullable(academicYear, other.academicYear);
+            && equalsNullable(academicYear, other.academicYear)
+            && equalsNullable(intelFeeTerm, other.intelFeeTerm)
+            && equalsNullable(intelFeeAy, other.intelFeeAy)
+            && equalsNullable(tshirtTerm, other.tshirtTerm)
+            && equalsNullable(tshirtAy, other.tshirtAy)
+            && equalsNullable(penaltiesTerm, other.penaltiesTerm)
+            && equalsNullable(penaltiesAy, other.penaltiesAy)
+            && equalsNullable(citNightTerm, other.citNightTerm)
+            && equalsNullable(citNightAy, other.citNightAy);
     }
 
     private static boolean equalsNullable(Object a, Object b) {
