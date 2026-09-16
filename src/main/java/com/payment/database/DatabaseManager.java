@@ -243,7 +243,19 @@ public class DatabaseManager {
             ")",
 
             "CREATE INDEX IF NOT EXISTS idx_student_merges_code ON student_merges(merge_code)",
-            "CREATE INDEX IF NOT EXISTS idx_student_merges_status ON student_merges(status)"
+            "CREATE INDEX IF NOT EXISTS idx_student_merges_status ON student_merges(status)",
+
+            // dismissed_student_similarities table
+            "CREATE TABLE IF NOT EXISTS dismissed_student_similarities (" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT," +
+            "    student_code_1 TEXT NOT NULL," +
+            "    student_code_2 TEXT NOT NULL," +
+            "    dismissed_at TEXT NOT NULL," +
+            "    dismissed_by TEXT," +
+            "    reason TEXT," +
+            "    UNIQUE(student_code_1, student_code_2)" +
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_dismissed_similarities ON dismissed_student_similarities(student_code_1, student_code_2)"
         };
 
         try (Statement stmt = connection.createStatement()) {
@@ -407,6 +419,17 @@ public class DatabaseManager {
                     System.out.println("Migration: Added payment_ids column to student_merges table");
                 }
             }
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS dismissed_student_similarities (" +
+                "    id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "    student_code_1 TEXT NOT NULL," +
+                "    student_code_2 TEXT NOT NULL," +
+                "    dismissed_at TEXT NOT NULL," +
+                "    dismissed_by TEXT," +
+                "    reason TEXT," +
+                "    UNIQUE(student_code_1, student_code_2)" +
+                ")");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_dismissed_similarities ON dismissed_student_similarities(student_code_1, student_code_2)");
 
             repairHistoricalReceivedByAndRemarks(stmt);
         }
@@ -2334,5 +2357,78 @@ public class DatabaseManager {
         r.setReason(rs.getString("reason"));
         r.setStatus(rs.getString("status"));
         return r;
+    }
+
+    /**
+     * Mark a pair of student records as dismissed / not a duplicate.
+     */
+    public synchronized void dismissStudentSimilarity(String code1, String code2, String reason, String user) throws SQLException {
+        if (code1 == null || code2 == null || code1.equalsIgnoreCase(code2)) return;
+        String first = code1.compareTo(code2) <= 0 ? code1 : code2;
+        String second = code1.compareTo(code2) <= 0 ? code2 : code1;
+        String sql = "INSERT OR REPLACE INTO dismissed_student_similarities (student_code_1, student_code_2, dismissed_at, dismissed_by, reason) VALUES (?, ?, ?, ?, ?)";
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+            stmt.setString(1, first);
+            stmt.setString(2, second);
+            stmt.setString(3, LocalDateTime.now().toString());
+            stmt.setString(4, user != null ? user : "user");
+            stmt.setString(5, reason != null ? reason : "Marked as not a duplicate");
+            stmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Un-dismiss a previously dismissed pair of student records.
+     */
+    public synchronized void undismissStudentSimilarity(String code1, String code2) throws SQLException {
+        if (code1 == null || code2 == null) return;
+        String first = code1.compareTo(code2) <= 0 ? code1 : code2;
+        String second = code1.compareTo(code2) <= 0 ? code2 : code1;
+        String sql = "DELETE FROM dismissed_student_similarities WHERE student_code_1 = ? AND student_code_2 = ?";
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+            stmt.setString(1, first);
+            stmt.setString(2, second);
+            stmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Check if a pair of student records has been dismissed as a duplicate candidate.
+     */
+    public synchronized boolean isSimilarityDismissed(String code1, String code2) {
+        if (code1 == null || code2 == null) return false;
+        String first = code1.compareTo(code2) <= 0 ? code1 : code2;
+        String second = code1.compareTo(code2) <= 0 ? code2 : code1;
+        String sql = "SELECT 1 FROM dismissed_student_similarities WHERE student_code_1 = ? AND student_code_2 = ?";
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+            stmt.setString(1, first);
+            stmt.setString(2, second);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Get all dismissed similarity pair keys ("code1:code2" and "code2:code1").
+     */
+    public synchronized Set<String> getDismissedSimilarityPairKeys() {
+        Set<String> set = new HashSet<>();
+        String sql = "SELECT student_code_1, student_code_2 FROM dismissed_student_similarities";
+        try (Statement stmt = getConnection().createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                String c1 = rs.getString(1);
+                String c2 = rs.getString(2);
+                set.add(c1 + ":" + c2);
+                set.add(c2 + ":" + c1);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return set;
     }
 }

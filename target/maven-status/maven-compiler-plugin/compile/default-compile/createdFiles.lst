@@ -1,6 +1,7 @@
 com\payment\database\JsonMigration.class
 com\payment\ui\PaymentPanel$5.class
 com\payment\StudentPaymentApp.class
+com\payment\StudentSimilarityService.class
 com\payment\ui\ReportsPanel$CyberCurrencyRenderer.class
 com\payment\ImportService$ImportLookupSnapshot.class
 com\payment\ImportBatch.class
@@ -8,6 +9,7 @@ com\payment\ui\ReportsPanel$1FeeSplit.class
 com\payment\DataManager$LocalDateAdapter.class
 com\payment\ui\MergeStudentsDialog$1.class
 com\payment\ui\SettingsPanel$3.class
+com\payment\ui\MergeStudentsDialog$4.class
 com\payment\DataManager$SavedData.class
 com\payment\ui\ReportsPanel$2.class
 com\payment\ui\MainFrame.class
@@ -18,6 +20,7 @@ com\payment\ImportService.class
 com\payment\ImportResult.class
 com\payment\ui\StudentPanel$3.class
 com\payment\ui\PaymentPanel$PaymentTableModel.class
+com\payment\SimilarStudentCandidate$Confidence.class
 com\payment\StudentPaymentApp$3.class
 com\payment\ImportDialog$StatusCellRenderer.class
 com\payment\ui\ImportPanel.class
@@ -27,10 +30,13 @@ com\payment\ui\ThemeUtils$1.class
 com\payment\database\DatabaseManager.class
 com\payment\ui\DataQualityPanel$IssuesTableModel.class
 com\payment\StudentMergeRecord.class
+com\payment\ui\MergeStudentsDialog$3.class
 com\payment\NameNormalizer.class
 com\payment\ui\SettingsPanel$4.class
 com\payment\StudentPaymentApp$4.class
 com\payment\ui\DashboardPanel$ActionCellRenderer.class
+com\payment\ui\StudentPanel$4.class
+com\payment\SimilarStudentCandidate.class
 com\payment\ui\AuditLogPanel$1.class
 com\payment\ui\MainFrame$1.class
 com\payment\ui\DataQualityPanel.class
@@ -46,10 +52,14 @@ com\payment\ImportDialog.class
 com\payment\ui\ReportsPanel$1.class
 com\payment\ui\DataQualityPanel$2.class
 com\payment\ui\SettingsPanel.class
+com\payment\ui\ReportsPanel$1StudentGroup.class
 com\payment\ui\DataQualityPanel$QualityIssue$Severity.class
 com\payment\ui\ThemeUtils$2.class
 com\payment\AuditService.class
+com\payment\NameSimilarity$SimilarityResult.class
+com\payment\ui\MergeStudentsDialog$ConfidenceScoreRenderer.class
 com\payment\ui\MergeStudentsDialog$MergeStatusCellRenderer.class
+com\payment\NameSimilarity.class
 com\payment\ui\StudentPanel$CyberAvatarPanel.class
 com\payment\ui\StudentPanel$2.class
 com\payment\StudentPaymentApp$2.class
@@ -70,6 +80,7 @@ com\payment\ImportDialog$SelectedFilesTableModel.class
 com\payment\ReceiptKey.class
 com\payment\ui\PaymentPanel$1.class
 com\payment\ui\SettingsPanel$2.class
+com\payment\ui\ReportsPanel$SingleCategoryResult.class
 com\payment\StudentCodeGenerator.class
 com\payment\ui\MergeStudentsDialog$StudentComboItem.class
 com\payment\ui\AuditLogPanel$AuditTableModel.class
@@ -78,6 +89,7 @@ com\payment\ui\StudentPanel.class
 com\payment\ui\DashboardPanel$2.class
 com\payment\ui\PaymentPanel$3.class
 com\payment\ExcelImporter$1.class
+com\payment\SimilarStudentCandidate$ThemeConstant.class
 com\payment\ui\ImportPanel$BatchTableModel.class
 com\payment\ui\SettingsPanel$1.class
 com\payment\ui\ReportsPanel$ReportTableModel.class
@@ -92,6 +104,7 @@ com\payment\ui\ThemeUtils.class
 com\payment\ImportDialog$PreviewTableModel.class
 com\payment\ImportPreviewResult.class
 com\payment\Payment.class
+com\payment\ui\MergeStudentsDialog$CandidateTableModel.class
 com\payment\ui\MergeStudentsDialog.class
 com\payment\ui\DataQualityPanel$QualityIssue.class
 com\payment\ui\PaymentPanel$2.class
@@ -101,6 +114,7 @@ com\payment\ui\ImportPanel$1.class
 com\payment\ImportPreviewItem.class
 com\payment\VoidReceiptRule.class
 com\payment\StudentPaymentApp$1.class
+com\payment\ui\MergeStudentsDialog$ThresholdOption.class
 com\payment\RefundReceiptRule.class
 com\payment\ImportDialog$2.class
 com\payment\ui\DashboardPanel$AuditTableModel.class

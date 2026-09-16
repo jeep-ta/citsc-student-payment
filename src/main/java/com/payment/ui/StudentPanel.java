@@ -1,22 +1,29 @@
 package com.payment.ui;
 
+import com.payment.Payment;
+import com.payment.SimilarStudentCandidate;
 import com.payment.Student;
+import com.payment.StudentSimilarityService;
 import com.payment.database.DatabaseManager;
 
 import javax.swing.*;
 import javax.swing.table.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Students Panel - Manage student records with profile avatar,
- * payment summary cards, and student merge & undo features.
+ * payment summary cards, fee breakdown, receipts feed, and student merge & undo features.
  */
 public class StudentPanel extends JPanel {
 
     private final DatabaseManager db;
+    private final StudentSimilarityService similarityService;
 
     private JTable studentTable;
     private StudentTableModel studentTableModel;
@@ -29,13 +36,30 @@ public class StudentPanel extends JPanel {
     private CyberAvatarPanel avatarPanel;
     private JLabel detailStudentCode;
     private JLabel detailName;
-    private JLabel detailProgram;
-    private JLabel detailYearLevel;
+    private JLabel detailProgramBadge;
+    private JLabel detailYearBadge;
+    private JLabel detailRegisteredDate;
     private JLabel detailPaymentCount;
     private JLabel detailTotalAmount;
 
+    // Similarity alert banner
+    private JPanel similarityAlertCard;
+    private JLabel similarityAlertText;
+    private SimilarStudentCandidate currentSimilarityCandidate;
+    private Student currentSelectedStudent;
+
+    // Fee breakdown labels
+    private JLabel intelFeeVal;
+    private JLabel tshirtFeeVal;
+    private JLabel citNightVal;
+    private JLabel penaltiesVal;
+
+    // Receipts feed
+    private JPanel receiptsFeedContainer;
+
     public StudentPanel() {
         this.db = DatabaseManager.getInstance();
+        this.similarityService = new StudentSimilarityService(this.db);
         initializeUI();
         refreshData();
     }
@@ -121,6 +145,12 @@ public class StudentPanel extends JPanel {
             openMergeDialog(preselected);
         });
         toolBar.add(mergeButton);
+
+        JButton detectSimilarButton = new JButton("✨ Detect Similar Names");
+        ThemeUtils.styleButton(detectSimilarButton, ThemeUtils.NEON_GREEN);
+        detectSimilarButton.setToolTipText("Scan and detect students with similar names or typos to review and merge");
+        detectSimilarButton.addActionListener(e -> openSimilarDetectorDialog());
+        toolBar.add(detectSimilarButton);
 
         leftPanel.add(toolBar, BorderLayout.NORTH);
 
@@ -217,6 +247,7 @@ public class StudentPanel extends JPanel {
         JPopupMenu popupMenu = new JPopupMenu();
         JMenuItem viewPaymentsItem = new JMenuItem("View Payment History");
         JMenuItem mergeItem = new JMenuItem("Merge with Another Student...");
+        JMenuItem findSimilarItem = new JMenuItem("✨ Detect Similar Names...");
         JMenuItem copyCodeItem = new JMenuItem("Copy Student Code");
         JMenuItem copyNameItem = new JMenuItem("Copy Student Name");
 
@@ -244,6 +275,8 @@ public class StudentPanel extends JPanel {
             }
         });
 
+        findSimilarItem.addActionListener(e -> openSimilarDetectorDialog());
+
         copyCodeItem.addActionListener(e -> {
             int selectedRow = studentTable.getSelectedRow();
             if (selectedRow >= 0) {
@@ -266,6 +299,7 @@ public class StudentPanel extends JPanel {
 
         popupMenu.add(viewPaymentsItem);
         popupMenu.add(mergeItem);
+        popupMenu.add(findSimilarItem);
         popupMenu.addSeparator();
         popupMenu.add(copyCodeItem);
         popupMenu.add(copyNameItem);
@@ -275,7 +309,13 @@ public class StudentPanel extends JPanel {
 
     private void openMergeDialog(String preselectedSourceCode) {
         Window window = SwingUtilities.getWindowAncestor(this);
-        MergeStudentsDialog dialog = new MergeStudentsDialog(window, preselectedSourceCode, null, this::refreshData);
+        MergeStudentsDialog dialog = new MergeStudentsDialog(window, preselectedSourceCode, null, preselectedSourceCode != null ? 1 : 0, this::refreshData);
+        dialog.setVisible(true);
+    }
+
+    private void openSimilarDetectorDialog() {
+        Window window = SwingUtilities.getWindowAncestor(this);
+        MergeStudentsDialog dialog = new MergeStudentsDialog(window, 0, this::refreshData);
         dialog.setVisible(true);
     }
 
@@ -287,237 +327,484 @@ public class StudentPanel extends JPanel {
     }
 
     private JPanel createDetailPanel() {
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(ThemeUtils.BG_SURFACE);
         panel.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(ThemeUtils.BORDER_COLOR, 1),
-            BorderFactory.createEmptyBorder(0, 0, 20, 0)
+            BorderFactory.createEmptyBorder(0, 0, 0, 0)
         ));
-        panel.setPreferredSize(new Dimension(380, 0));
+        panel.setPreferredSize(new Dimension(400, 0));
 
-        // Header with accent glow
+        // Header with accent glow & Quick Copy button
         JPanel headerBar = new JPanel(new BorderLayout());
         headerBar.setBackground(ThemeUtils.BG_CARD);
         headerBar.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(2, 0, 0, 0, ThemeUtils.NEON_CYAN),
-            BorderFactory.createEmptyBorder(14, 18, 10, 18)
+            BorderFactory.createMatteBorder(2, 0, 1, 0, ThemeUtils.NEON_CYAN),
+            BorderFactory.createEmptyBorder(10, 14, 10, 14)
         ));
-        headerBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
-        headerBar.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JLabel titleLabel = new JLabel("👤 Student Profile");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 15f));
         titleLabel.setForeground(ThemeUtils.NEON_CYAN);
         headerBar.add(titleLabel, BorderLayout.WEST);
-        panel.add(headerBar);
-        panel.add(Box.createVerticalStrut(14));
 
-        // Profile row: Avatar on LEFT matching red circle beside student info on RIGHT
-        JPanel profileRow = new JPanel(new BorderLayout(14, 0));
-        profileRow.setOpaque(false);
-        profileRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        profileRow.setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 14));
-        profileRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 180));
+        JButton copyCodeBtn = new JButton("📋 Copy Code");
+        ThemeUtils.styleButton(copyCodeBtn, ThemeUtils.TEXT_SECONDARY);
+        copyCodeBtn.setFont(copyCodeBtn.getFont().deriveFont(Font.PLAIN, 11f));
+        copyCodeBtn.addActionListener(e -> {
+            if (currentSelectedStudent != null && currentSelectedStudent.getStudentCode() != null) {
+                Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                    new java.awt.datatransfer.StringSelection(currentSelectedStudent.getStudentCode()), null);
+                JOptionPane.showMessageDialog(this, "Copied student code: " + currentSelectedStudent.getStudentCode(),
+                    "Clipboard", JOptionPane.INFORMATION_MESSAGE);
+            }
+        });
+        headerBar.add(copyCodeBtn, BorderLayout.EAST);
+        panel.add(headerBar, BorderLayout.NORTH);
 
-        // Left: Avatar container centered vertically with 165x165 dimensions
+        // Scrollable content body
+        JPanel contentPanel = new JPanel();
+        contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
+        contentPanel.setBackground(ThemeUtils.BG_SURFACE);
+        contentPanel.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
+
+        // 1. Profile Card with Avatar & Badges
+        JPanel profileCard = ThemeUtils.createFuturisticCard(ThemeUtils.NEON_CYAN);
+        profileCard.setLayout(new BorderLayout(12, 0));
+        profileCard.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        profileCard.setMaximumSize(new Dimension(Integer.MAX_VALUE, 130));
+
         JPanel avatarContainer = new JPanel(new GridBagLayout());
         avatarContainer.setOpaque(false);
-        avatarContainer.setPreferredSize(new Dimension(165, 165));
-        avatarContainer.setMinimumSize(new Dimension(165, 165));
-        avatarContainer.setMaximumSize(new Dimension(165, 165));
+        avatarContainer.setPreferredSize(new Dimension(100, 100));
+        avatarContainer.setMinimumSize(new Dimension(100, 100));
+        avatarContainer.setMaximumSize(new Dimension(100, 100));
         avatarPanel = new CyberAvatarPanel();
         avatarContainer.add(avatarPanel);
-        profileRow.add(avatarContainer, BorderLayout.WEST);
+        profileCard.add(avatarContainer, BorderLayout.WEST);
 
-        // Right: Student Info fields
         JPanel infoWrapper = new JPanel();
         infoWrapper.setLayout(new BoxLayout(infoWrapper, BoxLayout.Y_AXIS));
         infoWrapper.setOpaque(false);
-        infoWrapper.setMinimumSize(new Dimension(50, 0));
 
-        // Student code
-        detailStudentCode = createDetailField(infoWrapper, "Student Record No.", "-");
+        detailName = new JLabel("No Student Selected");
+        detailName.setFont(detailName.getFont().deriveFont(Font.BOLD, 15f));
+        detailName.setForeground(ThemeUtils.TEXT_PRIMARY);
+        infoWrapper.add(detailName);
+        infoWrapper.add(Box.createVerticalStrut(3));
+
+        detailStudentCode = new JLabel("-");
+        detailStudentCode.setFont(detailStudentCode.getFont().deriveFont(Font.PLAIN, 12f));
+        detailStudentCode.setForeground(ThemeUtils.TEXT_SECONDARY);
+        infoWrapper.add(detailStudentCode);
         infoWrapper.add(Box.createVerticalStrut(6));
 
-        // Name
-        detailName = createDetailField(infoWrapper, "Name", "-");
+        JPanel badgeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        badgeRow.setOpaque(false);
+        badgeRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        detailProgramBadge = createPillBadge("Program: -", ThemeUtils.NEON_CYAN);
+        badgeRow.add(detailProgramBadge);
+
+        detailYearBadge = createPillBadge("Year: -", ThemeUtils.NEON_PURPLE);
+        badgeRow.add(detailYearBadge);
+        infoWrapper.add(badgeRow);
         infoWrapper.add(Box.createVerticalStrut(6));
 
-        // Program
-        detailProgram = createDetailField(infoWrapper, "Program", "-");
-        infoWrapper.add(Box.createVerticalStrut(6));
+        detailRegisteredDate = new JLabel("📅 Joined: -");
+        detailRegisteredDate.setFont(detailRegisteredDate.getFont().deriveFont(Font.PLAIN, 10f));
+        detailRegisteredDate.setForeground(ThemeUtils.TEXT_MUTED);
+        infoWrapper.add(detailRegisteredDate);
 
-        // Year Level
-        detailYearLevel = createDetailField(infoWrapper, "Year Level", "-");
+        profileCard.add(infoWrapper, BorderLayout.CENTER);
+        contentPanel.add(profileCard);
+        contentPanel.add(Box.createVerticalStrut(10));
 
-        profileRow.add(infoWrapper, BorderLayout.CENTER);
+        // 2. Smart Similarity Alert Banner (Hidden by default)
+        similarityAlertCard = ThemeUtils.createFuturisticCard(ThemeUtils.NEON_AMBER);
+        similarityAlertCard.setLayout(new BorderLayout(8, 4));
+        similarityAlertCard.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
+        similarityAlertCard.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
+        similarityAlertCard.setVisible(false);
 
-        panel.add(profileRow);
-        panel.add(Box.createVerticalStrut(14));
+        similarityAlertText = new JLabel("⚠️ Similar student detected");
+        similarityAlertText.setFont(similarityAlertText.getFont().deriveFont(Font.PLAIN, 11f));
+        similarityAlertText.setForeground(ThemeUtils.TEXT_PRIMARY);
+        similarityAlertCard.add(similarityAlertText, BorderLayout.CENTER);
 
-        // Separator glow line
-        JPanel sepLine = new JPanel();
-        sepLine.setBackground(ThemeUtils.BORDER_COLOR);
-        sepLine.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
-        sepLine.setAlignmentX(Component.LEFT_ALIGNMENT);
-        panel.add(sepLine);
-        panel.add(Box.createVerticalStrut(14));
+        JButton similarityReviewBtn = new JButton("Review Merge");
+        ThemeUtils.styleButton(similarityReviewBtn, ThemeUtils.NEON_AMBER);
+        similarityReviewBtn.setFont(similarityReviewBtn.getFont().deriveFont(Font.BOLD, 10f));
+        similarityReviewBtn.addActionListener(e -> {
+            if (currentSimilarityCandidate != null && currentSelectedStudent != null) {
+                Student sA = currentSimilarityCandidate.getStudentA();
+                Student sB = currentSimilarityCandidate.getStudentB();
+                Student other = sA.getStudentCode().equals(currentSelectedStudent.getStudentCode()) ? sB : sA;
+                Window window = SwingUtilities.getWindowAncestor(this);
+                MergeStudentsDialog dialog = new MergeStudentsDialog(window, currentSelectedStudent.getStudentCode(), other.getStudentCode(), 0, this::refreshData);
+                dialog.setVisible(true);
+            }
+        });
+        similarityAlertCard.add(similarityReviewBtn, BorderLayout.EAST);
+        contentPanel.add(similarityAlertCard);
+        contentPanel.add(Box.createVerticalStrut(10));
 
-        // Payment Summary section header
-        JPanel summaryHeader = new JPanel(new BorderLayout());
-        summaryHeader.setOpaque(false);
-        summaryHeader.setBorder(BorderFactory.createEmptyBorder(0, 18, 0, 18));
-        summaryHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        summaryHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+        // 3. Financial Summary Cards (2 in a grid row)
+        JPanel statsRow = new JPanel(new GridLayout(1, 2, 8, 0));
+        statsRow.setOpaque(false);
+        statsRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 65));
 
-        JLabel summaryLabel = new JLabel("💰 Payment Summary");
-        summaryLabel.setFont(summaryLabel.getFont().deriveFont(Font.BOLD, 14f));
-        summaryLabel.setForeground(ThemeUtils.NEON_GREEN);
-        summaryLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        summaryHeader.add(summaryLabel, BorderLayout.WEST);
-        panel.add(summaryHeader);
-        panel.add(Box.createVerticalStrut(10));
-
-        // Summary cards row
-        JPanel cardsWrapper = new JPanel();
-        cardsWrapper.setLayout(new BoxLayout(cardsWrapper, BoxLayout.Y_AXIS));
-        cardsWrapper.setOpaque(false);
-        cardsWrapper.setBorder(BorderFactory.createEmptyBorder(0, 14, 0, 14));
-        cardsWrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        // Payment Count card
         JPanel countCard = ThemeUtils.createFuturisticCard(ThemeUtils.NEON_CYAN);
         countCard.setLayout(new BoxLayout(countCard, BoxLayout.Y_AXIS));
-        countCard.setBorder(BorderFactory.createEmptyBorder(10, 16, 10, 16));
-        countCard.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
-
-        JLabel countLabel = new JLabel("Total Payments");
-        countLabel.setFont(countLabel.getFont().deriveFont(Font.PLAIN, 11f));
-        countLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
-        countLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        countCard.add(countLabel);
+        countCard.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
+        JLabel countLbl = new JLabel("Total Payments");
+        countLbl.setFont(countLbl.getFont().deriveFont(Font.PLAIN, 10f));
+        countLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
+        countCard.add(countLbl);
         countCard.add(Box.createVerticalStrut(2));
-
         detailPaymentCount = new JLabel("0");
-        detailPaymentCount.setFont(detailPaymentCount.getFont().deriveFont(Font.BOLD, 20f));
+        detailPaymentCount.setFont(detailPaymentCount.getFont().deriveFont(Font.BOLD, 18f));
         detailPaymentCount.setForeground(ThemeUtils.NEON_CYAN);
-        detailPaymentCount.setAlignmentX(Component.LEFT_ALIGNMENT);
         countCard.add(detailPaymentCount);
+        statsRow.add(countCard);
 
-        cardsWrapper.add(countCard);
-        cardsWrapper.add(Box.createVerticalStrut(8));
-
-        // Total Paid card
         JPanel amountCard = ThemeUtils.createFuturisticCard(ThemeUtils.NEON_GREEN);
         amountCard.setLayout(new BoxLayout(amountCard, BoxLayout.Y_AXIS));
-        amountCard.setBorder(BorderFactory.createEmptyBorder(10, 16, 10, 16));
-        amountCard.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
-
-        JLabel amountLabel = new JLabel("Total Paid");
-        amountLabel.setFont(amountLabel.getFont().deriveFont(Font.PLAIN, 11f));
-        amountLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
-        amountLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        amountCard.add(amountLabel);
+        amountCard.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
+        JLabel amtLbl = new JLabel("Total Paid");
+        amtLbl.setFont(amtLbl.getFont().deriveFont(Font.PLAIN, 10f));
+        amtLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
+        amountCard.add(amtLbl);
         amountCard.add(Box.createVerticalStrut(2));
-
         detailTotalAmount = new JLabel("₱0.00");
-        detailTotalAmount.setFont(detailTotalAmount.getFont().deriveFont(Font.BOLD, 20f));
+        detailTotalAmount.setFont(detailTotalAmount.getFont().deriveFont(Font.BOLD, 18f));
         detailTotalAmount.setForeground(ThemeUtils.NEON_GREEN);
-        detailTotalAmount.setAlignmentX(Component.LEFT_ALIGNMENT);
         amountCard.add(detailTotalAmount);
+        statsRow.add(amountCard);
 
-        cardsWrapper.add(amountCard);
-        panel.add(cardsWrapper);
+        contentPanel.add(statsRow);
+        contentPanel.add(Box.createVerticalStrut(10));
 
-        panel.add(Box.createVerticalGlue());
+        // 4. Fee Category Breakdown
+        JPanel feeCard = ThemeUtils.createFuturisticCard(ThemeUtils.NEON_PURPLE);
+        feeCard.setLayout(new BoxLayout(feeCard, BoxLayout.Y_AXIS));
+        feeCard.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        feeCard.setMaximumSize(new Dimension(Integer.MAX_VALUE, 110));
 
-        // Buttons Wrapper
-        JPanel btnWrapper = new JPanel();
-        btnWrapper.setLayout(new BoxLayout(btnWrapper, BoxLayout.Y_AXIS));
-        btnWrapper.setOpaque(false);
-        btnWrapper.setBorder(BorderFactory.createEmptyBorder(10, 14, 0, 14));
-        btnWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 90));
-        btnWrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JLabel feeTitle = new JLabel("📊 Fee Category Breakdown");
+        feeTitle.setFont(feeTitle.getFont().deriveFont(Font.BOLD, 12f));
+        feeTitle.setForeground(ThemeUtils.NEON_PURPLE);
+        feeCard.add(feeTitle);
+        feeCard.add(Box.createVerticalStrut(8));
 
-        JButton viewPaymentsButton = new JButton("📋 View Payment History");
-        viewPaymentsButton.setFont(viewPaymentsButton.getFont().deriveFont(Font.BOLD, 12f));
-        viewPaymentsButton.setAlignmentX(Component.CENTER_ALIGNMENT);
-        viewPaymentsButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 35));
-        ThemeUtils.styleButton(viewPaymentsButton, ThemeUtils.NEON_CYAN);
-        viewPaymentsButton.addActionListener(e -> {
-            int selectedRow = studentTable.getSelectedRow();
-            if (selectedRow >= 0) {
-                int modelRow = studentTable.convertRowIndexToModel(selectedRow);
-                Student student = studentTableModel.getStudent(modelRow);
-                if (student != null) {
-                    navigateToStudentPayments(student);
-                }
+        JPanel feeGrid = new JPanel(new GridLayout(2, 2, 8, 6));
+        feeGrid.setOpaque(false);
+
+        intelFeeVal = new JLabel("-");
+        feeGrid.add(createFeeItem("💻 Intel Fee", intelFeeVal, ThemeUtils.NEON_CYAN));
+
+        tshirtFeeVal = new JLabel("-");
+        feeGrid.add(createFeeItem("👕 T-Shirt Fee", tshirtFeeVal, ThemeUtils.NEON_GREEN));
+
+        citNightVal = new JLabel("-");
+        feeGrid.add(createFeeItem("🌙 CIT Night", citNightVal, ThemeUtils.NEON_AMBER));
+
+        penaltiesVal = new JLabel("-");
+        feeGrid.add(createFeeItem("⚠️ Penalties", penaltiesVal, ThemeUtils.NEON_ROSE));
+
+        feeCard.add(feeGrid);
+        contentPanel.add(feeCard);
+        contentPanel.add(Box.createVerticalStrut(10));
+
+        // 5. Recent Payment Receipts Feed
+        JPanel receiptsSection = new JPanel(new BorderLayout(0, 6));
+        receiptsSection.setOpaque(false);
+
+        JLabel receiptsHeader = new JLabel("🧾 Payment Receipts");
+        receiptsHeader.setFont(receiptsHeader.getFont().deriveFont(Font.BOLD, 12f));
+        receiptsHeader.setForeground(ThemeUtils.TEXT_PRIMARY);
+        receiptsSection.add(receiptsHeader, BorderLayout.NORTH);
+
+        receiptsFeedContainer = new JPanel();
+        receiptsFeedContainer.setLayout(new BoxLayout(receiptsFeedContainer, BoxLayout.Y_AXIS));
+        receiptsFeedContainer.setOpaque(false);
+        receiptsSection.add(receiptsFeedContainer, BorderLayout.CENTER);
+
+        contentPanel.add(receiptsSection);
+        contentPanel.add(Box.createVerticalGlue());
+
+        JScrollPane scrollPane = new JScrollPane(contentPanel);
+        scrollPane.setBorder(null);
+        scrollPane.getViewport().setBackground(ThemeUtils.BG_SURFACE);
+        scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scrollPane.getVerticalScrollBar().setUnitIncrement(14);
+        panel.add(scrollPane, BorderLayout.CENTER);
+
+        // 6. Bottom Quick Action Bar
+        JPanel bottomBar = new JPanel(new GridLayout(1, 3, 6, 0));
+        bottomBar.setBackground(ThemeUtils.BG_CARD);
+        bottomBar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(1, 0, 0, 0, ThemeUtils.BORDER_COLOR),
+            BorderFactory.createEmptyBorder(8, 10, 8, 10)
+        ));
+
+        JButton viewPaymentsBtn = new JButton("📋 Ledger");
+        viewPaymentsBtn.setFont(viewPaymentsBtn.getFont().deriveFont(Font.BOLD, 11f));
+        ThemeUtils.styleButton(viewPaymentsBtn, ThemeUtils.NEON_CYAN);
+        viewPaymentsBtn.setToolTipText("Filter and view this student's transactions in the Payments tab");
+        viewPaymentsBtn.addActionListener(e -> {
+            if (currentSelectedStudent != null) {
+                navigateToStudentPayments(currentSelectedStudent);
             } else {
                 JOptionPane.showMessageDialog(this, "Please select a student first.", "No Student Selected", JOptionPane.INFORMATION_MESSAGE);
             }
         });
-        btnWrapper.add(viewPaymentsButton);
+        bottomBar.add(viewPaymentsBtn);
 
-        panel.add(btnWrapper);
+        JButton mergeBtn = new JButton("🔀 Merge");
+        mergeBtn.setFont(mergeBtn.getFont().deriveFont(Font.BOLD, 11f));
+        ThemeUtils.styleButton(mergeBtn, ThemeUtils.NEON_AMBER);
+        mergeBtn.setToolTipText("Consolidate with another student record");
+        mergeBtn.addActionListener(e -> {
+            if (currentSelectedStudent != null) {
+                openMergeDialog(currentSelectedStudent.getStudentCode());
+            } else {
+                openMergeDialog(null);
+            }
+        });
+        bottomBar.add(mergeBtn);
 
+        JButton similarBtn = new JButton("✨ Similar");
+        similarBtn.setFont(similarBtn.getFont().deriveFont(Font.BOLD, 11f));
+        ThemeUtils.styleButton(similarBtn, ThemeUtils.NEON_GREEN);
+        similarBtn.setToolTipText("Detect students with similar names");
+        similarBtn.addActionListener(e -> openSimilarDetectorDialog());
+        bottomBar.add(similarBtn);
+
+        panel.add(bottomBar, BorderLayout.SOUTH);
+
+        clearDetails();
         return panel;
     }
 
-    private JLabel createDetailField(JPanel parent, String label, String value) {
-        JPanel container = new JPanel();
-        container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
-        container.setAlignmentX(Component.LEFT_ALIGNMENT);
-        container.setOpaque(false);
-        container.setMinimumSize(new Dimension(50, 36));
-        container.setMaximumSize(new Dimension(Integer.MAX_VALUE, 46));
+    private JLabel createPillBadge(String text, Color accent) {
+        JLabel lbl = new JLabel(text);
+        lbl.setFont(lbl.getFont().deriveFont(Font.BOLD, 10f));
+        lbl.setForeground(accent);
+        lbl.setBackground(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 25));
+        lbl.setOpaque(true);
+        lbl.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 120), 1),
+            BorderFactory.createEmptyBorder(2, 6, 2, 6)
+        ));
+        return lbl;
+    }
 
-        JLabel labelComp = new JLabel(label);
-        labelComp.setFont(labelComp.getFont().deriveFont(Font.PLAIN, 11f));
-        labelComp.setForeground(ThemeUtils.TEXT_SECONDARY);
-        labelComp.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        JLabel valueComp = new JLabel(value);
-        valueComp.setFont(valueComp.getFont().deriveFont(Font.PLAIN, 13f));
-        valueComp.setForeground(ThemeUtils.TEXT_PRIMARY);
-        valueComp.setAlignmentX(Component.LEFT_ALIGNMENT);
-        valueComp.setMinimumSize(new Dimension(30, 16));
-
-        container.add(labelComp);
-        container.add(Box.createVerticalStrut(2));
-        container.add(valueComp);
-
-        parent.add(container);
-        return valueComp;
+    private JPanel createFeeItem(String title, JLabel valLabel, Color accent) {
+        JPanel p = new JPanel(new BorderLayout(4, 2));
+        p.setOpaque(false);
+        JLabel t = new JLabel(title);
+        t.setFont(t.getFont().deriveFont(Font.PLAIN, 10f));
+        t.setForeground(ThemeUtils.TEXT_SECONDARY);
+        valLabel.setFont(valLabel.getFont().deriveFont(Font.BOLD, 12f));
+        valLabel.setForeground(accent);
+        p.add(t, BorderLayout.NORTH);
+        p.add(valLabel, BorderLayout.CENTER);
+        return p;
     }
 
     private void showStudentDetails(int modelRow) {
         Student student = studentTableModel.getStudent(modelRow);
+        this.currentSelectedStudent = student;
 
         if (avatarPanel != null) {
             avatarPanel.setStudent(student);
         }
 
-        detailStudentCode.setText(student.getStudentCode());
         detailName.setText(student.getName());
         detailName.setToolTipText(student.getName());
-        detailProgram.setText(student.getFormattedProgramName());
-        detailProgram.setToolTipText(student.getFormattedProgramName());
-        detailYearLevel.setText(student.getFormattedYearLevel());
+        detailStudentCode.setText(student.getStudentCode());
+
+        String prog = student.getFormattedProgramName();
+        detailProgramBadge.setText("💻 " + prog);
+        detailProgramBadge.setToolTipText("Program: " + prog);
+
+        String yl = student.getFormattedYearLevel();
+        detailYearBadge.setText("🎓 " + yl);
+
+        if (student.getCreatedAt() != null) {
+            detailRegisteredDate.setText("📅 Joined: " + student.getCreatedAt().format(DateTimeFormatter.ofPattern("MMM dd, yyyy")));
+        } else {
+            detailRegisteredDate.setText("📅 Joined: -");
+        }
+
         detailPaymentCount.setText(String.valueOf(student.getPaymentCount()));
         detailTotalAmount.setText(String.format("₱%,.2f", student.getTotalAmount()));
+
+        // Calculate fee category breakdowns
+        List<Payment> payments = student.getPayments();
+        double totalIntel = 0.0;
+        double totalTshirt = 0.0;
+        double totalCitNight = 0.0;
+        double totalPenalties = 0.0;
+        String tshirtSize = null;
+
+        if (payments != null) {
+            for (Payment p : payments) {
+                if (p.isActive()) {
+                    if (p.getIntelFee() != null) totalIntel += p.getIntelFee();
+                    if (p.getTshirtSizing() != null) totalTshirt += p.getTshirtSizing();
+                    if (p.getCitNight() != null) totalCitNight += p.getCitNight();
+                    if (p.getPenalties() != null) totalPenalties += p.getPenalties();
+                    if (p.getRemarks() != null && !p.getRemarks().isBlank() && tshirtSize == null) {
+                        String r = p.getRemarks().trim();
+                        if (r.toLowerCase().contains("size") || r.length() <= 5) {
+                            tshirtSize = r;
+                        }
+                    }
+                }
+            }
+        }
+
+        intelFeeVal.setText(totalIntel > 0 ? String.format("₱%,.2f", totalIntel) : "-");
+        tshirtFeeVal.setText(totalTshirt > 0 ? (String.format("₱%,.2f", totalTshirt) + (tshirtSize != null ? " (" + tshirtSize + ")" : "")) : "-");
+        citNightVal.setText(totalCitNight > 0 ? String.format("₱%,.2f", totalCitNight) : "-");
+        penaltiesVal.setText(totalPenalties > 0 ? String.format("₱%,.2f", totalPenalties) : "-");
+
+        populateReceiptsFeed(payments);
+        checkSimilarityForSelectedStudent(student);
+    }
+
+    private void populateReceiptsFeed(List<Payment> payments) {
+        receiptsFeedContainer.removeAll();
+        if (payments == null || payments.isEmpty()) {
+            JPanel emptyCard = ThemeUtils.createFuturisticCard(ThemeUtils.BORDER_COLOR);
+            emptyCard.setLayout(new FlowLayout(FlowLayout.CENTER, 8, 8));
+            JLabel emptyLbl = new JLabel("<html><small style='color:#64748B;'>No payment receipts recorded</small></html>");
+            emptyCard.add(emptyLbl);
+            receiptsFeedContainer.add(emptyCard);
+        } else {
+            List<Payment> sorted = new ArrayList<>(payments);
+            sorted.sort((p1, p2) -> Integer.compare(p2.getReceiptNumber(), p1.getReceiptNumber()));
+            int limit = Math.min(6, sorted.size());
+            for (int i = 0; i < limit; i++) {
+                Payment p = sorted.get(i);
+                receiptsFeedContainer.add(createReceiptItemCard(p));
+                if (i < limit - 1) {
+                    receiptsFeedContainer.add(Box.createVerticalStrut(6));
+                }
+            }
+            if (sorted.size() > limit) {
+                receiptsFeedContainer.add(Box.createVerticalStrut(4));
+                JLabel moreLbl = new JLabel(String.format("<html><small style='color:#00F0FF;'>+ %d more receipt(s) in full ledger</small></html>", sorted.size() - limit));
+                moreLbl.setAlignmentX(Component.CENTER_ALIGNMENT);
+                receiptsFeedContainer.add(moreLbl);
+            }
+        }
+        receiptsFeedContainer.revalidate();
+        receiptsFeedContainer.repaint();
+    }
+
+    private JPanel createReceiptItemCard(Payment p) {
+        Color accent = p.isActive() ? ThemeUtils.NEON_CYAN : (p.isVoid() ? ThemeUtils.NEON_ROSE : ThemeUtils.NEON_PURPLE);
+        JPanel card = ThemeUtils.createFuturisticCard(accent);
+        card.setLayout(new BorderLayout(6, 3));
+        card.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
+
+        JPanel topRow = new JPanel(new BorderLayout());
+        topRow.setOpaque(false);
+
+        JLabel rcptNo = new JLabel("Receipt #" + p.getReceiptNumber());
+        rcptNo.setFont(rcptNo.getFont().deriveFont(Font.BOLD, 12f));
+        rcptNo.setForeground(ThemeUtils.TEXT_PRIMARY);
+        topRow.add(rcptNo, BorderLayout.WEST);
+
+        JLabel amt = new JLabel(String.format("₱%,.2f", p.getTotalAmount()));
+        amt.setFont(amt.getFont().deriveFont(Font.BOLD, 12f));
+        amt.setForeground(p.isActive() ? ThemeUtils.NEON_GREEN : ThemeUtils.TEXT_MUTED);
+        topRow.add(amt, BorderLayout.EAST);
+
+        card.add(topRow, BorderLayout.NORTH);
+
+        StringBuilder subSb = new StringBuilder();
+        if (p.getRemittanceDate() != null) {
+            subSb.append(p.getRemittanceDate());
+        }
+        String scope = p.getReceiptKey().displayScope();
+        if (scope != null && !scope.equals("Unscoped")) {
+            if (subSb.length() > 0) subSb.append(" • ");
+            subSb.append(scope);
+        }
+        if (p.isVoid()) {
+            subSb.append(" • <font color='#F43F5E'><b>VOID</b></font>");
+        } else if (p.isRefunded()) {
+            subSb.append(" • <font color='#A855F7'><b>REFUNDED</b></font>");
+        }
+
+        JLabel subLbl = new JLabel("<html><small style='color:#94A3B8;'>" + subSb + "</small></html>");
+        card.add(subLbl, BorderLayout.CENTER);
+
+        return card;
+    }
+
+    private void checkSimilarityForSelectedStudent(Student student) {
+        if (similarityService == null || student == null) {
+            similarityAlertCard.setVisible(false);
+            return;
+        }
+
+        SwingWorker<SimilarStudentCandidate, Void> worker = new SwingWorker<>() {
+            @Override
+            protected SimilarStudentCandidate doInBackground() {
+                List<Student> all = studentTableModel.getStudents();
+                List<SimilarStudentCandidate> matches = similarityService.findSimilarForStudent(student, all, 0.85);
+                return matches.isEmpty() ? null : matches.get(0);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    SimilarStudentCandidate cand = get();
+                    if (cand != null && currentSelectedStudent != null &&
+                        currentSelectedStudent.getStudentCode().equals(student.getStudentCode())) {
+                        currentSimilarityCandidate = cand;
+                        Student other = cand.getStudentA().getStudentCode().equals(student.getStudentCode())
+                            ? cand.getStudentB() : cand.getStudentA();
+                        similarityAlertText.setText(String.format("<html><b>Similar Name:</b> %s (%d%% match)</html>",
+                            other.getName(), cand.getSimilarityPercentage()));
+                        similarityAlertCard.setVisible(true);
+                    } else {
+                        currentSimilarityCandidate = null;
+                        similarityAlertCard.setVisible(false);
+                    }
+                } catch (Exception ignored) {
+                    similarityAlertCard.setVisible(false);
+                }
+            }
+        };
+        worker.execute();
     }
 
     private void clearDetails() {
+        currentSelectedStudent = null;
+        currentSimilarityCandidate = null;
         if (avatarPanel != null) {
             avatarPanel.setStudent(null);
         }
         detailStudentCode.setText("-");
-        detailName.setText("-");
-        detailProgram.setText("-");
-        detailYearLevel.setText("-");
+        detailName.setText("No Student Selected");
+        detailProgramBadge.setText("Program: -");
+        detailYearBadge.setText("Year: -");
+        detailRegisteredDate.setText("📅 Joined: -");
         detailPaymentCount.setText("0");
         detailTotalAmount.setText("₱0.00");
+        intelFeeVal.setText("-");
+        tshirtFeeVal.setText("-");
+        citNightVal.setText("-");
+        penaltiesVal.setText("-");
+        similarityAlertCard.setVisible(false);
+        populateReceiptsFeed(Collections.emptyList());
     }
 
     public void refreshData() {
@@ -689,6 +976,10 @@ public class StudentPanel extends JPanel {
         public void setStudents(List<Student> students) {
             this.students = students;
             fireTableDataChanged();
+        }
+
+        public List<Student> getStudents() {
+            return students;
         }
 
         public Student getStudent(int rowIndex) {

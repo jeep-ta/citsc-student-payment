@@ -1,6 +1,9 @@
 com\payment\StudentMergeAndTermTest.class
 com\payment\ImportBatchTest.class
+com\payment\NameSimilarityTest.class
 com\payment\NameNormalizerTest.class
+com\payment\ui\SingleCategoryReportTest.class
+com\payment\StudentSimilarityServiceTest.class
 com\payment\VoidReceiptRuleTest.class
 com\payment\StudentCodeGeneratorTest.class
 com\payment\PaymentTest.class

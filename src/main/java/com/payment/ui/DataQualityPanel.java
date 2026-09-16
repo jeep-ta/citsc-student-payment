@@ -3,6 +3,8 @@ package com.payment.ui;
 import com.payment.Payment;
 import com.payment.Student;
 import com.payment.ChargeAcademicTerm;
+import com.payment.SimilarStudentCandidate;
+import com.payment.StudentSimilarityService;
 import com.payment.database.DatabaseManager;
 
 import javax.swing.*;
@@ -20,6 +22,7 @@ import java.util.stream.Collectors;
 public class DataQualityPanel extends JPanel {
 
     private final DatabaseManager db;
+    private final StudentSimilarityService similarityService;
 
     private JTable issuesTable;
     private IssuesTableModel issuesTableModel;
@@ -27,6 +30,7 @@ public class DataQualityPanel extends JPanel {
 
     public DataQualityPanel() {
         this.db = DatabaseManager.getInstance();
+        this.similarityService = new StudentSimilarityService(this.db);
         initializeUI();
         scanForIssues();
     }
@@ -82,6 +86,12 @@ public class DataQualityPanel extends JPanel {
         ThemeUtils.styleButton(mergeButton, ThemeUtils.NEON_CYAN);
         mergeButton.addActionListener(e -> openMergeDialog());
         toolBar.add(mergeButton);
+
+        JButton detectSimilarButton = new JButton("✨ Detect Similar Names");
+        ThemeUtils.styleButton(detectSimilarButton, ThemeUtils.NEON_GREEN);
+        detectSimilarButton.setToolTipText("Scan and detect students with similar names to review and merge");
+        detectSimilarButton.addActionListener(e -> openSimilarDetectorDialog());
+        toolBar.add(detectSimilarButton);
 
         headerPanel.add(toolBar, BorderLayout.CENTER);
         add(headerPanel, BorderLayout.NORTH);
@@ -153,9 +163,13 @@ public class DataQualityPanel extends JPanel {
             openMergeDialog(preselected);
         });
 
+        JMenuItem detectSimilarItem = new JMenuItem("✨ Review Similar Students...");
+        detectSimilarItem.addActionListener(e -> openSimilarDetectorDialog());
+
         popupMenu.add(setCurrItem);
         popupMenu.add(setPrevItem);
         popupMenu.add(mergeItem);
+        popupMenu.add(detectSimilarItem);
         popupMenu.addSeparator();
         popupMenu.add(viewItem);
         popupMenu.add(copyIdItem);
@@ -222,7 +236,11 @@ public class DataQualityPanel extends JPanel {
                         "Navigation Error", JOptionPane.ERROR_MESSAGE);
                 }
             } else if ("STUDENT".equals(issue.entity)) {
-                mainFrame.navigateTo("Students");
+                if ("Similar Student Name".equals(issue.issueType)) {
+                    openSimilarDetectorDialog();
+                } else {
+                    mainFrame.navigateTo("Students");
+                }
             }
         }
     }
@@ -233,7 +251,13 @@ public class DataQualityPanel extends JPanel {
 
     private void openMergeDialog(String preselectedSource) {
         Window window = SwingUtilities.getWindowAncestor(this);
-        MergeStudentsDialog dialog = new MergeStudentsDialog(window, preselectedSource, null, this::scanForIssues);
+        MergeStudentsDialog dialog = new MergeStudentsDialog(window, preselectedSource, null, preselectedSource != null ? 1 : 0, this::scanForIssues);
+        dialog.setVisible(true);
+    }
+
+    private void openSimilarDetectorDialog() {
+        Window window = SwingUtilities.getWindowAncestor(this);
+        MergeStudentsDialog dialog = new MergeStudentsDialog(window, 0, this::scanForIssues);
         dialog.setVisible(true);
     }
 
@@ -264,6 +288,27 @@ public class DataQualityPanel extends JPanel {
                             "OPEN"
                         ));
                     }
+                }
+
+                // 1b. Check for similar student names (high confidence >= 85%)
+                try {
+                    List<SimilarStudentCandidate> similarCandidates = similarityService.findSimilarStudents(students, 0.85, false, false);
+                    for (SimilarStudentCandidate candidate : similarCandidates) {
+                        if (!candidate.isExactNormalized()) {
+                            issues.add(new QualityIssue(
+                                QualityIssue.Severity.WARNING,
+                                "Similar Student Name",
+                                "STUDENT",
+                                candidate.getStudentA().getStudentCode(),
+                                String.format("Similar to %s (%s) [%d%% match]: %s",
+                                    candidate.getStudentB().getName(), candidate.getStudentB().getStudentCode(),
+                                    candidate.getSimilarityPercentage(), candidate.getReasonSummary()),
+                                "OPEN"
+                            ));
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
 
                 // 2. Check for receipt conflicts

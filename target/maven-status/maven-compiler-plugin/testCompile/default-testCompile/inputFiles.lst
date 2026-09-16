@@ -1,13 +1,15 @@
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\ui\SingleCategoryReportTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\FeeTermRuleTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\AuditServiceTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\StudentCodeGeneratorTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\VoidReceiptRuleTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\RefundReceiptRuleTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\PaymentTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\ImportBatchTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\NameNormalizerTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\ChargeAcademicTermTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\StudentMergeAndTermTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\StudentTest.java
-C:\Users\CIT SC\Documents\Payment Database\citsc-student-payment\src\test\java\com\payment\ImportServiceTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\StudentMergeAndTermTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\RefundReceiptRuleTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\StudentCodeGeneratorTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\ChargeAcademicTermTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\AuditServiceTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\StudentTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\ImportServiceTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\NameNormalizerTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\ui\SingleCategoryReportTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\FeeTermRuleTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\PaymentTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\NameSimilarityTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\VoidReceiptRuleTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\StudentSimilarityServiceTest.java
+F:\Jeptha\Council\Payment Database\citsc-student-payment\src\test\java\com\payment\ImportBatchTest.java
