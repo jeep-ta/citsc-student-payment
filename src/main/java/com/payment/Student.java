@@ -177,12 +177,15 @@ public class Student {
     // --- Calculated fields ---
     public double getTotalAmount() {
         return payments.stream()
+            .filter(p -> p.isActive() || p.isRefunded())
             .mapToDouble(Payment::getTotalAmount)
             .sum();
     }
 
     public int getPaymentCount() {
-        return payments.size();
+        return (int) payments.stream()
+            .filter(Payment::isActive)
+            .count();
     }
 
     // --- Equality based on studentCode (if set) or normalizedName ---

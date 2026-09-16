@@ -63,6 +63,35 @@ public class StudentTest {
     }
 
     @Test
+    void testTotalAmountExcludesVoidPayments() {
+        Student s = new Student("Test Student");
+        Payment p1 = new Payment(1, "Test Student", "BSIT", 100.0, 50.0, 0.0, 25.0, "Receiver", "R1");
+        Payment p2 = new Payment(2, "Test Student", "BSIT", 200.0, null, 10.0, 0.0, "Receiver", "damaged receipt");
+        p2.setStatus(Payment.STATUS_VOID);
+        s.addPayment(p1);
+        s.addPayment(p2);
+        assertEquals(175.0, s.getTotalAmount(), 0.001, "Void payment should not be included in student total");
+        assertEquals(1, s.getPaymentCount(), "Void payment should not be included in active payment count");
+    }
+
+    @Test
+    void testTotalAmountSubtractsRefundedPayments() {
+        Student s = new Student("Test Student");
+        Payment p1 = new Payment(1, "Test Student", "BSIT", 100.0, 50.0, 0.0, 25.0, "Receiver", "R1"); // 175
+        Payment p2 = new Payment(2, "Test Student", "BSIT", 50.0, null, 10.0, null, "Receiver", "refunded to student"); // 60
+        p2.setStatus(Payment.STATUS_REFUNDED);
+        Payment p3 = new Payment(3, "Test Student", "BSIT", 500.0, null, null, null, "Receiver", "damaged"); // 500
+        p3.setStatus(Payment.STATUS_VOID);
+
+        s.addPayment(p1);
+        s.addPayment(p2);
+        s.addPayment(p3);
+
+        assertEquals(115.0, s.getTotalAmount(), 0.001, "Refunded payment must subtract from student total (175 - 60 = 115)");
+        assertEquals(1, s.getPaymentCount(), "Only active payment should be in active payment count");
+    }
+
+    @Test
     void testCreatedUpdatedTimestamps() {
         Student s = new Student("Test");
         assertNotNull(s.getCreatedAt());

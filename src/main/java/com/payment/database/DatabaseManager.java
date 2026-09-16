@@ -6,8 +6,10 @@ import com.payment.ImportBatchFile;
 import com.payment.FeeTermRule;
 import com.payment.Payment;
 import com.payment.ReceiptKey;
+import com.payment.RefundReceiptRule;
 import com.payment.Student;
 import com.payment.StudentMergeRecord;
+import com.payment.VoidReceiptRule;
 
 import java.io.File;
 import java.sql.*;
@@ -84,6 +86,12 @@ public class DatabaseManager {
 
             // Run schema migrations for existing databases
             runMigrations();
+
+            // Retroactively apply void receipt rule to existing payments
+            applyVoidRuleToExistingPayments("system");
+
+            // Retroactively apply refund rule to existing payments
+            applyRefundRuleToExistingPayments("system");
 
             String dbLocation = customJdbcUrl != null ? customJdbcUrl : new File(DB_FILE).getAbsolutePath();
             System.out.println("Database initialized: " + dbLocation);
@@ -399,6 +407,119 @@ public class DatabaseManager {
                     System.out.println("Migration: Added payment_ids column to student_merges table");
                 }
             }
+
+            repairHistoricalReceivedByAndRemarks(stmt);
+        }
+    }
+
+    private void repairHistoricalReceivedByAndRemarks(Statement stmt) {
+        try {
+            boolean alreadyRun = false;
+            try (ResultSet rs = stmt.executeQuery("SELECT value FROM app_settings WHERE key = 'migration_repair_received_by_remarks_v1'")) {
+                if (rs.next() && "done".equals(rs.getString("value"))) {
+                    alreadyRun = true;
+                }
+            }
+            if (alreadyRun) {
+                return;
+            }
+
+            int candidates = 0;
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM payments WHERE (received_by IS NULL OR TRIM(received_by) = '') AND (remarks IS NOT NULL AND TRIM(remarks) <> '')")) {
+                if (rs.next()) {
+                    candidates = rs.getInt(1);
+                }
+            }
+
+            if (candidates > 0) {
+                Map<Integer, String[]> excelMap = new HashMap<>();
+                String userHome = System.getProperty("user.home");
+                File folder = new File(userHome, "Documents/Payment Import");
+                if (!folder.exists() || !folder.isDirectory()) {
+                    folder = new File("C:/Users/CIT SC/Documents/Payment Import");
+                }
+                if (folder.exists() && folder.isDirectory()) {
+                    File[] files = folder.listFiles((dir, name) -> name.toLowerCase().endsWith(".xlsx"));
+                    if (files != null) {
+                        for (File file : files) {
+                            try (org.apache.poi.ss.usermodel.Workbook wb = org.apache.poi.ss.usermodel.WorkbookFactory.create(file)) {
+                                org.apache.poi.ss.usermodel.Sheet sheet = wb.getSheetAt(0);
+                                org.apache.poi.ss.usermodel.Row header = sheet.getRow(0);
+                                if (header == null) continue;
+                                int recByCol = -1;
+                                int remCol = -1;
+                                for (int c = 0; c < header.getLastCellNum(); c++) {
+                                    org.apache.poi.ss.usermodel.Cell h = header.getCell(c);
+                                    if (h == null) continue;
+                                    String s = h.toString().toLowerCase().trim();
+                                    if (s.contains("received")) recByCol = c;
+                                    else if (s.contains("remark")) remCol = c;
+                                }
+                                if (recByCol < 0) recByCol = 8;
+                                if (remCol < 0) remCol = 9;
+
+                                for (int r = 1; r <= sheet.getLastRowNum(); r++) {
+                                    org.apache.poi.ss.usermodel.Row row = sheet.getRow(r);
+                                    if (row == null) continue;
+                                    org.apache.poi.ss.usermodel.Cell rc = row.getCell(1);
+                                    if (rc == null) continue;
+                                    try {
+                                        int rNum = (int) rc.getNumericCellValue();
+                                        if (rNum > 0) {
+                                            String recBy = row.getCell(recByCol) != null ? row.getCell(recByCol).toString().trim() : "";
+                                            String rem = row.getCell(remCol) != null ? row.getCell(remCol).toString().trim() : "";
+                                            excelMap.put(rNum, new String[]{recBy, rem});
+                                        }
+                                    } catch (Exception ignored) {}
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                }
+
+                String selectSql = "SELECT id, receipt_number, received_by, remarks, status FROM payments " +
+                                   "WHERE (received_by IS NULL OR TRIM(received_by) = '') AND (remarks IS NOT NULL AND TRIM(remarks) <> '')";
+                try (PreparedStatement selectStmt = connection.prepareStatement(selectSql);
+                     ResultSet rs = selectStmt.executeQuery();
+                     PreparedStatement updateStmt = connection.prepareStatement("UPDATE payments SET received_by = ?, remarks = ?, status = ? WHERE id = ?")) {
+                    while (rs.next()) {
+                        int id = rs.getInt("id");
+                        int rNum = rs.getInt("receipt_number");
+                        String curRecBy = rs.getString("received_by");
+                        String curRem = rs.getString("remarks");
+                        String curStatus = rs.getString("status");
+
+                        String newRecBy = curRecBy;
+                        String newRem = curRem;
+                        String newStatus = curStatus;
+
+                        if (excelMap.containsKey(rNum)) {
+                            String[] info = excelMap.get(rNum);
+                            newRecBy = info[0];
+                            newRem = info[1];
+                        } else {
+                            newRecBy = curRem;
+                            newRem = "";
+                        }
+
+                        if (newRem != null && RefundReceiptRule.isRefundDueToRemarks(newRem)) {
+                            newStatus = Payment.STATUS_REFUNDED;
+                        } else if (newRem != null && VoidReceiptRule.isVoidDueToRemarks(newRem)) {
+                            newStatus = Payment.STATUS_VOID;
+                        }
+
+                        updateStmt.setString(1, newRecBy);
+                        updateStmt.setString(2, newRem);
+                        updateStmt.setString(3, newStatus);
+                        updateStmt.setInt(4, id);
+                        updateStmt.executeUpdate();
+                    }
+                }
+            }
+
+            stmt.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('migration_repair_received_by_remarks_v1', 'done')");
+        } catch (Exception e) {
+            System.err.println("Note: repairHistoricalReceivedByAndRemarks skipped or encountered: " + e.getMessage());
         }
     }
 
@@ -499,7 +620,7 @@ public class DatabaseManager {
                     Student s = mapStudent(rs);
                     List<Payment> payments = getPaymentsByStudent(s.getStudentCode());
                     for (Payment p : payments) {
-                        if ("ACTIVE".equals(p.getStatus())) {
+                        if (p.isActive() || p.isRefunded()) {
                             s.addPayment(p);
                         }
                     }
@@ -672,7 +793,7 @@ public class DatabaseManager {
         for (int start = 0; start < studentCodes.size(); start += SQLITE_BIND_BATCH_SIZE) {
             int end = Math.min(start + SQLITE_BIND_BATCH_SIZE, studentCodes.size());
             List<String> batch = studentCodes.subList(start, end);
-            String sql = "SELECT * FROM payments WHERE status = 'ACTIVE' AND student_id IN (" +
+            String sql = "SELECT * FROM payments WHERE status NOT LIKE 'VOID%' AND student_id IN (" +
                          placeholders(batch.size()) + ") ORDER BY receipt_number";
 
             try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
@@ -1410,6 +1531,41 @@ public class DatabaseManager {
     }
 
     /**
+     * Update payment status (ACTIVE, VOID, REFUNDED) with audit trail logging.
+     */
+    public boolean updatePaymentStatus(int paymentId, String newStatus, String reason, String user) throws SQLException {
+        Optional<Payment> existing = findPaymentById(paymentId);
+        if (existing.isEmpty()) return false;
+        Payment payment = existing.get();
+        String normalizedNew = Payment.normalizeStatus(newStatus);
+        String oldStatus = payment.getStatus() != null ? payment.getStatus() : Payment.STATUS_ACTIVE;
+        if (normalizedNew.equalsIgnoreCase(oldStatus)) {
+            return true; // No change needed
+        }
+
+        String sql = "UPDATE payments SET status = ?, updated_at = ? WHERE id = ?";
+        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
+            stmt.setString(1, normalizedNew);
+            stmt.setString(2, LocalDateTime.now().toString());
+            stmt.setInt(3, paymentId);
+            int updated = stmt.executeUpdate();
+            if (updated > 0) {
+                String action = "STATUS_CHANGE";
+                if (Payment.STATUS_VOID.equalsIgnoreCase(normalizedNew)) action = "VOID";
+                else if (Payment.STATUS_REFUNDED.equalsIgnoreCase(normalizedNew)) action = "REFUND";
+                else if (Payment.STATUS_ACTIVE.equalsIgnoreCase(normalizedNew)) action = "REACTIVATE";
+
+                logAudit(action, "PAYMENT", String.valueOf(payment.getReceiptNumber()),
+                    oldStatus, normalizedNew,
+                    reason != null && !reason.isBlank() ? reason : "Status changed to " + normalizedNew,
+                    user != null ? user : "user");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Set payment status to VOID with an audit trail entry.
      */
     public boolean voidPayment(int receiptNumber, String reason, String user) throws SQLException {
@@ -1418,22 +1574,7 @@ public class DatabaseManager {
     }
 
     public boolean voidPaymentById(int paymentId, String reason, String user) throws SQLException {
-        Optional<Payment> existing = findPaymentById(paymentId);
-        if (existing.isEmpty()) return false;
-        String sql = "UPDATE payments SET status = 'VOID', updated_at = ? WHERE id = ?";
-        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
-            stmt.setString(1, LocalDateTime.now().toString());
-            stmt.setInt(2, paymentId);
-            int updated = stmt.executeUpdate();
-            if (updated > 0) {
-                Payment payment = existing.get();
-                logAudit("VOID", "PAYMENT", String.valueOf(payment.getReceiptNumber()),
-                    "ACTIVE", "VOID", reason,
-                    user != null ? user : "user");
-                return true;
-            }
-        }
-        return false;
+        return updatePaymentStatus(paymentId, Payment.STATUS_VOID, reason, user);
     }
 
     /**
@@ -1445,22 +1586,129 @@ public class DatabaseManager {
     }
 
     public boolean unvoidPaymentById(int paymentId, String reason, String user) throws SQLException {
-        Optional<Payment> existing = findPaymentById(paymentId);
-        if (existing.isEmpty()) return false;
-        String sql = "UPDATE payments SET status = 'ACTIVE', updated_at = ? WHERE id = ?";
-        try (PreparedStatement stmt = getConnection().prepareStatement(sql)) {
-            stmt.setString(1, LocalDateTime.now().toString());
-            stmt.setInt(2, paymentId);
-            int updated = stmt.executeUpdate();
-            if (updated > 0) {
-                Payment payment = existing.get();
-                logAudit("UPDATE", "PAYMENT", String.valueOf(payment.getReceiptNumber()),
-                    "VOID", "ACTIVE", reason,
-                    user != null ? user : "user");
-                return true;
+        return updatePaymentStatus(paymentId, Payment.STATUS_ACTIVE, reason, user);
+    }
+
+    /**
+     * Mark a payment as REFUNDED with an audit trail entry.
+     */
+    public boolean refundPayment(int receiptNumber, String reason, String user) throws SQLException {
+        int paymentId = findUniquePaymentIdByReceipt(receiptNumber);
+        return paymentId >= 0 && refundPaymentById(paymentId, reason, user);
+    }
+
+    public boolean refundPaymentById(int paymentId, String reason, String user) throws SQLException {
+        return updatePaymentStatus(paymentId, Payment.STATUS_REFUNDED, reason, user);
+    }
+
+    /**
+     * Applies the VoidReceiptRule to existing ACTIVE payments whose remarks
+     * indicate voiding due to damages, duplications, or errors (strictly excluding refund statements).
+     *
+     * @param user The username or actor performing/triggering the update
+     * @return count of payments updated to VOID
+     */
+    public int applyVoidRuleToExistingPayments(String user) throws SQLException {
+        String querySql = "SELECT id, receipt_number, remarks FROM payments WHERE status = 'ACTIVE' AND remarks IS NOT NULL AND TRIM(remarks) != ''";
+        List<int[]> toVoid = new ArrayList<>();
+        List<String> voidReasons = new ArrayList<>();
+
+        try (Statement stmt = getConnection().createStatement();
+             ResultSet rs = stmt.executeQuery(querySql)) {
+            while (rs.next()) {
+                String remarks = rs.getString("remarks");
+                if (com.payment.VoidReceiptRule.isVoidDueToRemarks(remarks)) {
+                    toVoid.add(new int[]{rs.getInt("id"), rs.getInt("receipt_number")});
+                    voidReasons.add(com.payment.VoidReceiptRule.getVoidReason(remarks));
+                }
             }
         }
-        return false;
+
+        if (toVoid.isEmpty()) {
+            return 0;
+        }
+
+        String updateSql = "UPDATE payments SET status = 'VOID', updated_at = ? WHERE id = ?";
+        int updatedCount = 0;
+        String now = LocalDateTime.now().toString();
+
+        try (PreparedStatement stmt = getConnection().prepareStatement(updateSql)) {
+            for (int i = 0; i < toVoid.size(); i++) {
+                int[] record = toVoid.get(i);
+                int paymentId = record[0];
+                int receiptNumber = record[1];
+                String reason = voidReasons.get(i);
+
+                stmt.setString(1, now);
+                stmt.setInt(2, paymentId);
+                int count = stmt.executeUpdate();
+                if (count > 0) {
+                    updatedCount++;
+                    logAudit("VOID", "PAYMENT", String.valueOf(receiptNumber),
+                        "ACTIVE", "VOID", reason, user != null ? user : "system");
+                }
+            }
+        }
+
+        if (updatedCount > 0) {
+            System.out.printf("VoidReceiptRule: Auto-voided %d existing payment(s) based on remarks.%n", updatedCount);
+        }
+        return updatedCount;
+    }
+
+    /**
+     * Applies the RefundReceiptRule to existing ACTIVE payments whose remarks
+     * indicate a refund or reimbursement.
+     *
+     * @param user The username or actor performing/triggering the update
+     * @return count of payments updated to REFUNDED
+     */
+    public int applyRefundRuleToExistingPayments(String user) throws SQLException {
+        String querySql = "SELECT id, receipt_number, remarks FROM payments WHERE status = 'ACTIVE' AND remarks IS NOT NULL AND TRIM(remarks) != ''";
+        List<int[]> toRefund = new ArrayList<>();
+        List<String> refundReasons = new ArrayList<>();
+
+        try (Statement stmt = getConnection().createStatement();
+             ResultSet rs = stmt.executeQuery(querySql)) {
+            while (rs.next()) {
+                String remarks = rs.getString("remarks");
+                if (RefundReceiptRule.isRefundDueToRemarks(remarks)) {
+                    toRefund.add(new int[]{rs.getInt("id"), rs.getInt("receipt_number")});
+                    refundReasons.add(RefundReceiptRule.getRefundReason(remarks));
+                }
+            }
+        }
+
+        if (toRefund.isEmpty()) {
+            return 0;
+        }
+
+        String updateSql = "UPDATE payments SET status = 'REFUNDED', updated_at = ? WHERE id = ?";
+        int updatedCount = 0;
+        String now = LocalDateTime.now().toString();
+
+        try (PreparedStatement stmt = getConnection().prepareStatement(updateSql)) {
+            for (int i = 0; i < toRefund.size(); i++) {
+                int[] record = toRefund.get(i);
+                int paymentId = record[0];
+                int receiptNumber = record[1];
+                String reason = refundReasons.get(i);
+
+                stmt.setString(1, now);
+                stmt.setInt(2, paymentId);
+                int count = stmt.executeUpdate();
+                if (count > 0) {
+                    updatedCount++;
+                    logAudit("REFUND", "PAYMENT", String.valueOf(receiptNumber),
+                        "ACTIVE", "REFUNDED", reason, user != null ? user : "system");
+                }
+            }
+        }
+
+        if (updatedCount > 0) {
+            System.out.printf("RefundReceiptRule: Auto-refunded %d existing payment(s) based on remarks.%n", updatedCount);
+        }
+        return updatedCount;
     }
 
     private int findUniquePaymentIdByReceipt(int receiptNumber) throws SQLException {

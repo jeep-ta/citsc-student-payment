@@ -469,6 +469,191 @@ public class ImportServiceTest {
         }
     }
 
+    @Test
+    @Order(12)
+    void testImportVoidDamagedAndDuplicateReceipts() throws Exception {
+        String testFile = "void_remarks_import_test.xlsx";
+        try {
+            createVoidKeywordsExcelFile(testFile);
+            ImportPreviewResult preview = importService.generateBatchPreview(
+                List.of(new ImportFileSelection(testFile, "2025-2026", ChargeAcademicTerm.FIRST_SEM)),
+                LocalDate.now(), "testuser");
+
+            List<ImportPreviewItem> items = preview.getItems();
+            assertEquals(4, items.size());
+
+            // Row 1: Damaged receipt -> VOID
+            ImportPreviewItem damagedItem = items.stream().filter(it -> it.getReceiptNumber() == 30001).findFirst().orElseThrow();
+            assertTrue(damagedItem.isVoid(), "Damaged receipt must be recognized as VOID");
+            assertEquals(0.0, damagedItem.getTotalAmount(), "Void preview item total must be 0.0");
+            assertEquals(350.0, damagedItem.getFaceAmount());
+
+            // Row 2: Duplicate receipt -> VOID
+            ImportPreviewItem duplicateItem = items.stream().filter(it -> it.getReceiptNumber() == 30002).findFirst().orElseThrow();
+            assertTrue(duplicateItem.isVoid(), "Duplicate receipt must be recognized as VOID");
+            assertEquals(0.0, duplicateItem.getTotalAmount(), "Void preview item total must be 0.0");
+
+            // Row 3: Refund statement -> REFUNDED (not voided under damage/duplication rule, but marked as refund)
+            ImportPreviewItem refundItem = items.stream().filter(it -> it.getReceiptNumber() == 30003).findFirst().orElseThrow();
+            assertFalse(refundItem.isVoid(), "Refund statement must NOT be voided under damage rule");
+            assertTrue(refundItem.isRefunded(), "Refund statement must be recognized as REFUNDED");
+            assertEquals(-350.0, refundItem.getTotalAmount(), "Refund preview item must have negative face amount");
+
+            // Row 4: Regular remark -> ACTIVE
+            ImportPreviewItem normalItem = items.stream().filter(it -> it.getReceiptNumber() == 30004).findFirst().orElseThrow();
+            assertFalse(normalItem.isVoid());
+            assertFalse(normalItem.isRefunded());
+            assertEquals(350.0, normalItem.getTotalAmount());
+
+            // Commit import
+            importService.commitImport(preview);
+
+            // Verify in database
+            Payment p1 = db.findPayment(30001, damagedItem.getMatchedStudentCode() != null ? damagedItem.getMatchedStudentCode() : damagedItem.getProposedStudentCode()).orElseThrow();
+            assertTrue(p1.isVoid(), "Damaged payment in DB must have status VOID");
+            assertEquals(0.0, p1.getTotalAmount());
+            assertEquals(350.0, p1.getFaceAmount());
+
+            Payment p2 = db.findPayment(30002, duplicateItem.getMatchedStudentCode() != null ? duplicateItem.getMatchedStudentCode() : duplicateItem.getProposedStudentCode()).orElseThrow();
+            assertTrue(p2.isVoid(), "Duplicate payment in DB must have status VOID");
+
+            Payment p3 = db.findPayment(30003, refundItem.getMatchedStudentCode() != null ? refundItem.getMatchedStudentCode() : refundItem.getProposedStudentCode()).orElseThrow();
+            assertTrue(p3.isRefunded(), "Refund payment in DB must have status REFUNDED");
+            assertEquals(-350.0, p3.getTotalAmount(), "Refund payment total must be negative");
+            assertEquals(350.0, p3.getFaceAmount(), "Face amount should remain 350.0");
+
+            Payment p4 = db.findPayment(30004, normalItem.getMatchedStudentCode() != null ? normalItem.getMatchedStudentCode() : normalItem.getProposedStudentCode()).orElseThrow();
+            assertTrue(p4.isActive(), "Normal payment in DB must remain ACTIVE");
+
+            // Verify student balance for student with voided receipt
+            Student s1 = db.findStudentByCode(p1.getStudentId()).orElseThrow();
+            assertEquals(0.0, s1.getTotalAmount(), "Student with only voided payment must have 0 total");
+            assertEquals(0, s1.getPaymentCount());
+
+            // Verify student balance for student with refund receipt
+            Student s3 = db.findStudentByCode(p3.getStudentId()).orElseThrow();
+            assertEquals(-350.0, s3.getTotalAmount(), "Student with refund payment should have -350 total");
+            assertEquals(0, s3.getPaymentCount());
+        } finally {
+            new File(testFile).delete();
+        }
+    }
+
+    @Test
+    @Order(13)
+    void testApplyVoidAndRefundRuleToExistingPayments() throws Exception {
+        // Insert active payments directly
+        Student s = new Student("Retroactive Test Student");
+        s.setStudentCode("STU-009988");
+        s.setProgram("BSIT");
+        db.insertStudent(s);
+
+        Payment damaged = new Payment(40001, "Retroactive Test Student", "BSIT", 150.0, 200.0, null, null, "Admin", "damaged receipt");
+        damaged.setStudentId("STU-009988");
+        db.insertPayment(damaged);
+
+        Payment dup = new Payment(40002, "Retroactive Test Student", "BSIT", 100.0, null, null, null, "Admin", "double entry");
+        dup.setStudentId("STU-009988");
+        db.insertPayment(dup);
+
+        Payment refund = new Payment(40003, "Retroactive Test Student", "BSIT", 100.0, null, null, null, "Admin", "student refund");
+        refund.setStudentId("STU-009988");
+        db.insertPayment(refund);
+
+        Payment normal = new Payment(40004, "Retroactive Test Student", "BSIT", 100.0, null, null, null, "Admin", "Osorio");
+        normal.setStudentId("STU-009988");
+        db.insertPayment(normal);
+
+        // Apply retroactive void rule
+        int voidedCount = db.applyVoidRuleToExistingPayments("admin_test");
+        assertEquals(2, voidedCount, "Should auto-void exactly 2 payments (damaged & duplicate)");
+
+        // Apply retroactive refund rule
+        int refundedCount = db.applyRefundRuleToExistingPayments("admin_test");
+        assertEquals(1, refundedCount, "Should auto-refund exactly 1 payment with refund remark");
+
+        // Verify status
+        Payment pDamaged = db.findPayment(40001, "STU-009988").orElseThrow();
+        assertTrue(pDamaged.isVoid());
+
+        Payment pDup = db.findPayment(40002, "STU-009988").orElseThrow();
+        assertTrue(pDup.isVoid());
+
+        Payment pRefund = db.findPayment(40003, "STU-009988").orElseThrow();
+        assertFalse(pRefund.isVoid(), "Refund remark must NOT be auto-voided");
+        assertTrue(pRefund.isRefunded(), "Refund remark must be REFUNDED");
+        assertEquals(-100.0, pRefund.getTotalAmount());
+
+        Payment pNormal = db.findPayment(40004, "STU-009988").orElseThrow();
+        assertTrue(pNormal.isActive(), "Normal remark must remain ACTIVE");
+    }
+
+    @Test
+    @Order(14)
+    void testUpdatePaymentStatus() throws Exception {
+        Student s = new Student("Status Change Test Student");
+        s.setStudentCode("STU-007766");
+        s.setProgram("BSCS");
+        db.insertStudent(s);
+
+        Payment p = new Payment(50001, "Status Change Test Student", "BSCS", 200.0, 100.0, null, null, "Cashier", "None");
+        p.setStudentId("STU-007766");
+        db.insertPayment(p);
+
+        int paymentId = db.findPayment(50001, "STU-007766").orElseThrow().getId();
+
+        // Change status to VOID
+        boolean voidResult = db.updatePaymentStatus(paymentId, Payment.STATUS_VOID, "Voided due to clerical error", "auditor");
+        assertTrue(voidResult);
+        Payment pVoid = db.findPaymentById(paymentId).orElseThrow();
+        assertTrue(pVoid.isVoid());
+        assertEquals(0.0, pVoid.getTotalAmount());
+
+        // Change status to REFUNDED
+        boolean refundResult = db.updatePaymentStatus(paymentId, Payment.STATUS_REFUNDED, "Refunded to student", "auditor");
+        assertTrue(refundResult);
+        Payment pRefund = db.findPaymentById(paymentId).orElseThrow();
+        assertTrue(pRefund.isRefunded());
+        assertEquals(-300.0, pRefund.getTotalAmount());
+
+        // Change status back to ACTIVE
+        boolean activeResult = db.updatePaymentStatus(paymentId, Payment.STATUS_ACTIVE, "Reinstated by supervisor", "supervisor");
+        assertTrue(activeResult);
+        Payment pActive = db.findPaymentById(paymentId).orElseThrow();
+        assertTrue(pActive.isActive());
+        assertEquals(300.0, pActive.getTotalAmount());
+    }
+
+    private void createVoidKeywordsExcelFile(String fileName) throws IOException {
+        try (Workbook wb = new XSSFWorkbook();
+             FileOutputStream fos = new FileOutputStream(fileName)) {
+            Sheet sheet = wb.createSheet("Payments");
+            Row header = sheet.createRow(0);
+            String[] headers = {"#", "Receipt #", "Name", "Program", "Intel Fee", "Tshirt Sizing", "Penalties", "CIT Night", "Received by", "Remarks"};
+            for (int i = 0; i < headers.length; i++) header.createCell(i).setCellValue(headers[i]);
+
+            Object[][] rows = {
+                {1, 30001, "Void Student One", "BSIT", 150.0, 200.0, 0, 0, "Admin", "damaged receipt"},
+                {2, 30002, "Void Student Two", "BSCS", 150.0, 200.0, 0, 0, "Admin", "duplicate receipt"},
+                {3, 30003, "Void Student Three", "BSIT", 150.0, 200.0, 0, 0, "Admin", "refund requested"},
+                {4, 30004, "Void Student Four", "BSIT", 150.0, 200.0, 0, 0, "Admin", "Regular payment"}
+            };
+
+            for (int r = 0; r < rows.length; r++) {
+                Row row = sheet.createRow(r + 1);
+                for (int c = 0; c < rows[r].length; c++) {
+                    Object val = rows[r][c];
+                    if (val instanceof Number n) {
+                        row.createCell(c).setCellValue(n.doubleValue());
+                    } else {
+                        row.createCell(c).setCellValue(String.valueOf(val));
+                    }
+                }
+            }
+            wb.write(fos);
+        }
+    }
+
     private String createSingleRowExcelFile(String fileName, int receiptNumber,
                                             String studentName, double intelFee) throws IOException {
         try (Workbook wb = new XSSFWorkbook();

@@ -269,7 +269,7 @@ public class DataQualityPanel extends JPanel {
                 // 2. Check for receipt conflicts
                 List<Payment> payments = db.getAllPayments();
                 Map<com.payment.ReceiptKey, List<Payment>> byReceipt = payments.stream()
-                    .filter(p -> p.getReceiptKey().hasDefinedScope())
+                    .filter(p -> p.isActive() && p.getReceiptKey().hasDefinedScope())
                     .collect(Collectors.groupingBy(Payment::getReceiptKey));
 
                 for (Map.Entry<com.payment.ReceiptKey, List<Payment>> entry : byReceipt.entrySet()) {
@@ -313,7 +313,7 @@ public class DataQualityPanel extends JPanel {
                             String.valueOf(p.getId()),
                             String.format("Receipt %d has no issuance academic year/semester", p.getReceiptNumber()), "OPEN"));
                     }
-                    if (p.getTotalAmount() < 0) {
+                    if (!p.isRefunded() && p.getTotalAmount() < 0) {
                         issues.add(new QualityIssue(QualityIssue.Severity.ERROR, "Negative Total Amount", "PAYMENT",
                             String.valueOf(p.getId()),
                             String.format("Receipt %d has negative total: ₱%,.2f", p.getReceiptNumber(), p.getTotalAmount()), "OPEN"));

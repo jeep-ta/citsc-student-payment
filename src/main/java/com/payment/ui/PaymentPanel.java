@@ -115,7 +115,7 @@ public class PaymentPanel extends JPanel {
         toolBar.add(termFilter);
 
         toolBar.add(createToolLabel("Status:"));
-        statusFilter = new JComboBox<>(new String[]{"All", "ACTIVE", "VOID"});
+        statusFilter = new JComboBox<>(new String[]{"All", "ACTIVE", "VOID", "REFUNDED"});
         statusFilter.addActionListener(e -> filterPayments());
         toolBar.add(statusFilter);
 
@@ -131,32 +131,34 @@ public class PaymentPanel extends JPanel {
         headerPanel.add(toolBar, BorderLayout.CENTER);
         add(headerPanel, BorderLayout.NORTH);
 
-        // Payment table
+        // --- Table ---
         paymentTableModel = new PaymentTableModel();
         paymentTable = new JTable(paymentTableModel);
         paymentTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         ThemeUtils.applyTableTheme(paymentTable);
         paymentTable.getTableHeader().setFont(paymentTable.getTableHeader().getFont().deriveFont(Font.BOLD, 12f));
         paymentTable.setFont(paymentTable.getFont().deriveFont(Font.PLAIN, 12f));
+        paymentTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
 
         // Column widths
         paymentTable.getColumnModel().getColumn(0).setPreferredWidth(45);   // #
-        paymentTable.getColumnModel().getColumn(1).setPreferredWidth(80);   // Receipt
+        paymentTable.getColumnModel().getColumn(1).setPreferredWidth(85);   // Receipt #
         paymentTable.getColumnModel().getColumn(2).setPreferredWidth(100);  // Student Code
-        paymentTable.getColumnModel().getColumn(3).setPreferredWidth(160);  // Name
-        paymentTable.getColumnModel().getColumn(4).setPreferredWidth(75);   // Program
-        paymentTable.getColumnModel().getColumn(5).setPreferredWidth(90);   // Date
+        paymentTable.getColumnModel().getColumn(3).setPreferredWidth(180);  // Student Name
+        paymentTable.getColumnModel().getColumn(4).setPreferredWidth(65);   // Program
+        paymentTable.getColumnModel().getColumn(5).setPreferredWidth(90);   // Remittance Date
         paymentTable.getColumnModel().getColumn(6).setPreferredWidth(75);   // Intel Fee
         paymentTable.getColumnModel().getColumn(7).setPreferredWidth(75);   // T-Shirt
         paymentTable.getColumnModel().getColumn(8).setPreferredWidth(75);   // Penalties
         paymentTable.getColumnModel().getColumn(9).setPreferredWidth(75);   // CIT Night
-        paymentTable.getColumnModel().getColumn(10).setPreferredWidth(85);  // Received By
+        paymentTable.getColumnModel().getColumn(10).setPreferredWidth(105); // Received By
         paymentTable.getColumnModel().getColumn(11).setPreferredWidth(100); // AY
         paymentTable.getColumnModel().getColumn(12).setPreferredWidth(115); // Charge Term
         paymentTable.getColumnModel().getColumn(13).setPreferredWidth(100); // Receipt AY
         paymentTable.getColumnModel().getColumn(14).setPreferredWidth(110); // Receipt Term
-        paymentTable.getColumnModel().getColumn(15).setPreferredWidth(70);  // Status
+        paymentTable.getColumnModel().getColumn(15).setPreferredWidth(90);  // Status
         paymentTable.getColumnModel().getColumn(16).setPreferredWidth(90);  // Total
+        paymentTable.getColumnModel().getColumn(17).setPreferredWidth(160); // Remarks
 
         // Custom renderers
         CurrencyCellRenderer currencyRenderer = new CurrencyCellRenderer();
@@ -172,10 +174,24 @@ public class PaymentPanel extends JPanel {
         paymentTable.getColumnModel().getColumn(0).setCellRenderer(centerRenderer);
         paymentTable.getColumnModel().getColumn(1).setCellRenderer(centerRenderer);
         paymentTable.getColumnModel().getColumn(5).setCellRenderer(centerRenderer);
+        paymentTable.getColumnModel().getColumn(10).setCellRenderer(centerRenderer);
         paymentTable.getColumnModel().getColumn(11).setCellRenderer(centerRenderer);
         paymentTable.getColumnModel().getColumn(12).setCellRenderer(centerRenderer);
         paymentTable.getColumnModel().getColumn(13).setCellRenderer(centerRenderer);
         paymentTable.getColumnModel().getColumn(14).setCellRenderer(centerRenderer);
+
+        // Tooltip renderer for Remarks column
+        DefaultTableCellRenderer remarksRenderer = new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value,
+                    boolean isSelected, boolean hasFocus, int row, int column) {
+                super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                String text = value != null ? value.toString() : "";
+                setToolTipText(text.isBlank() ? null : text);
+                return this;
+            }
+        };
+        paymentTable.getColumnModel().getColumn(17).setCellRenderer(remarksRenderer);
 
         // Editor for Academic Year column
         JComboBox<String> yearCombo = new JComboBox<>(new String[]{
@@ -207,6 +223,12 @@ public class PaymentPanel extends JPanel {
             ChargeAcademicTerm.SUMMER.getLabel()
         });
         paymentTable.getColumnModel().getColumn(14).setCellEditor(new DefaultCellEditor(receiptTermCombo));
+
+        // Editor for Status column (ACTIVE, VOID, REFUNDED)
+        JComboBox<String> statusCombo = new JComboBox<>(new String[]{
+            Payment.STATUS_ACTIVE, Payment.STATUS_VOID, Payment.STATUS_REFUNDED
+        });
+        paymentTable.getColumnModel().getColumn(15).setCellEditor(new DefaultCellEditor(statusCombo));
 
         // Real-time filtering listeners with debounce
         javax.swing.Timer filterDebounceTimer = new javax.swing.Timer(150, e -> filterPayments());
@@ -259,8 +281,6 @@ public class PaymentPanel extends JPanel {
     private void setupContextMenu() {
         JPopupMenu popupMenu = new JPopupMenu();
         JMenuItem assignItem = new JMenuItem("Assign Terms / AY (Receipt & Fee Items)...");
-        JMenuItem voidItem = new JMenuItem("Void Payment");
-        JMenuItem unvoidItem = new JMenuItem("Reactivate Payment (Unvoid)");
 
         JMenu termMenu = new JMenu("Quick Assign Receipt Term");
         for (ChargeAcademicTerm term : ChargeAcademicTerm.values()) {
@@ -269,9 +289,27 @@ public class PaymentPanel extends JPanel {
             termMenu.add(item);
         }
 
+        JMenu statusMenu = new JMenu("Change Status");
+        JMenuItem setActiveSubItem = new JMenuItem("Mark as ACTIVE (Normal)");
+        JMenuItem setVoidSubItem = new JMenuItem("Mark as VOID (Ignored - ₱0.00)");
+        JMenuItem setRefundSubItem = new JMenuItem("Mark as REFUNDED (Subtract from Total)");
+
+        setActiveSubItem.addActionListener(e -> updateSelectedPaymentsStatus(Payment.STATUS_ACTIVE));
+        setVoidSubItem.addActionListener(e -> updateSelectedPaymentsStatus(Payment.STATUS_VOID));
+        setRefundSubItem.addActionListener(e -> updateSelectedPaymentsStatus(Payment.STATUS_REFUNDED));
+
+        statusMenu.add(setActiveSubItem);
+        statusMenu.add(setVoidSubItem);
+        statusMenu.add(setRefundSubItem);
+
+        JMenuItem voidItem = new JMenuItem("Void Payment (₱0.00)");
+        JMenuItem refundItem = new JMenuItem("Refund Payment (Subtract)");
+        JMenuItem unvoidItem = new JMenuItem("Reactivate Payment (ACTIVE)");
+
         assignItem.addActionListener(e -> openAssignTermDialogForSelected());
-        voidItem.addActionListener(e -> voidSelectedPayment());
-        unvoidItem.addActionListener(e -> unvoidSelectedPayment());
+        voidItem.addActionListener(e -> updateSelectedPaymentsStatus(Payment.STATUS_VOID));
+        refundItem.addActionListener(e -> updateSelectedPaymentsStatus(Payment.STATUS_REFUNDED));
+        unvoidItem.addActionListener(e -> updateSelectedPaymentsStatus(Payment.STATUS_ACTIVE));
 
         JMenuItem copyReceiptItem = new JMenuItem("Copy Receipt Number");
         JMenuItem copyStudentCodeItem = new JMenuItem("Copy Student Code");
@@ -281,7 +319,9 @@ public class PaymentPanel extends JPanel {
         popupMenu.add(assignItem);
         popupMenu.add(termMenu);
         popupMenu.addSeparator();
+        popupMenu.add(statusMenu);
         popupMenu.add(voidItem);
+        popupMenu.add(refundItem);
         popupMenu.add(unvoidItem);
         popupMenu.addSeparator();
         popupMenu.add(copyReceiptItem);
@@ -299,8 +339,10 @@ public class PaymentPanel extends JPanel {
                     int modelRow = paymentTable.convertRowIndexToModel(row);
                     Payment p = paymentTableModel.getPayment(modelRow);
                     boolean isVoid = p != null && p.isVoid();
+                    boolean isRefund = p != null && p.isRefunded();
                     voidItem.setEnabled(!isVoid);
-                    unvoidItem.setEnabled(isVoid);
+                    refundItem.setEnabled(!isRefund);
+                    unvoidItem.setEnabled(isVoid || isRefund);
                 }
             }
         });
@@ -583,48 +625,53 @@ public class PaymentPanel extends JPanel {
     }
 
     private void voidSelectedPayment() {
-        int selectedRow = paymentTable.getSelectedRow();
-        if (selectedRow < 0) return;
-        int modelRow = paymentTable.convertRowIndexToModel(selectedRow);
-        Payment p = paymentTableModel.getPayment(modelRow);
-        if (p == null) return;
-
-        String reason = JOptionPane.showInputDialog(this,
-            "Enter reason for voiding receipt #" + p.getReceiptNumber() + ":",
-            "Void Payment",
-            JOptionPane.WARNING_MESSAGE);
-
-        if (reason != null && !reason.trim().isEmpty()) {
-            try {
-                db.voidPaymentById(p.getId(), reason.trim(), "user");
-                refreshData();
-                JOptionPane.showMessageDialog(this, "Receipt #" + p.getReceiptNumber() + " has been voided.", "Payment Voided", JOptionPane.INFORMATION_MESSAGE);
-            } catch (Exception ex) {
-                JOptionPane.showMessageDialog(this, "Error voiding payment: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-            }
-        }
+        updateSelectedPaymentsStatus(Payment.STATUS_VOID);
     }
 
     private void unvoidSelectedPayment() {
-        int selectedRow = paymentTable.getSelectedRow();
-        if (selectedRow < 0) return;
-        int modelRow = paymentTable.convertRowIndexToModel(selectedRow);
-        Payment p = paymentTableModel.getPayment(modelRow);
-        if (p == null) return;
+        updateSelectedPaymentsStatus(Payment.STATUS_ACTIVE);
+    }
+
+    private void updateSelectedPaymentsStatus(String newStatus) {
+        int[] selectedRows = paymentTable.getSelectedRows();
+        if (selectedRows == null || selectedRows.length == 0) return;
+
+        String actionWord = "update";
+        if (Payment.STATUS_VOID.equalsIgnoreCase(newStatus)) actionWord = "void";
+        else if (Payment.STATUS_REFUNDED.equalsIgnoreCase(newStatus)) actionWord = "refund";
+        else if (Payment.STATUS_ACTIVE.equalsIgnoreCase(newStatus)) actionWord = "reactivate";
 
         String reason = JOptionPane.showInputDialog(this,
-            "Enter reason for reactivating receipt #" + p.getReceiptNumber() + ":",
-            "Reactivate Payment",
+            "Enter reason to " + actionWord + " " + selectedRows.length + " selected payment(s):",
+            "Change Payment Status to " + newStatus,
             JOptionPane.QUESTION_MESSAGE);
 
-        if (reason != null && !reason.trim().isEmpty()) {
-            try {
-                db.unvoidPaymentById(p.getId(), reason.trim(), "user");
-                refreshData();
-                JOptionPane.showMessageDialog(this, "Receipt #" + p.getReceiptNumber() + " has been reactivated.", "Payment Reactivated", JOptionPane.INFORMATION_MESSAGE);
-            } catch (Exception ex) {
-                JOptionPane.showMessageDialog(this, "Error reactivating payment: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        if (reason == null || reason.trim().isEmpty()) {
+            return;
+        }
+
+        int updatedCount = 0;
+        for (int row : selectedRows) {
+            int modelRow = paymentTable.convertRowIndexToModel(row);
+            Payment p = paymentTableModel.getPayment(modelRow);
+            if (p != null) {
+                try {
+                    db.updatePaymentStatus(p.getId(), newStatus, reason.trim(), "user");
+                    p.setStatus(newStatus);
+                    paymentTableModel.fireTableRowsUpdated(modelRow, modelRow);
+                    updatedCount++;
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(this,
+                        "Error updating payment status (ID " + p.getId() + "): " + ex.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
+                }
             }
+        }
+        if (updatedCount > 0) {
+            refreshData();
+            JOptionPane.showMessageDialog(this,
+                String.format("Successfully updated status to %s for %d payment(s).", newStatus, updatedCount),
+                "Status Updated", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
@@ -705,9 +752,11 @@ public class PaymentPanel extends JPanel {
                     double total = 0;
                     int activeCount = 0;
                     for (Payment p : payments) {
-                        if ("ACTIVE".equals(p.getStatus())) {
+                        if (p.isActive() || p.isRefunded()) {
                             total += p.getTotalAmount();
-                            activeCount++;
+                            if (p.isActive()) {
+                                activeCount++;
+                            }
                         }
                     }
 
@@ -729,13 +778,15 @@ public class PaymentPanel extends JPanel {
 
         List<RowFilter<Object, Object>> filters = new java.util.ArrayList<>();
 
-        // Name or Student Code search
+        // Name, Student Code, Received By, or Remarks search
         String searchText = searchField.getText().trim();
         if (!searchText.isEmpty()) {
-            List<RowFilter<Object, Object>> nameOrCode = new java.util.ArrayList<>();
-            nameOrCode.add(RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(searchText), 2)); // Student Code
-            nameOrCode.add(RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(searchText), 3)); // Name
-            filters.add(RowFilter.orFilter(nameOrCode));
+            List<RowFilter<Object, Object>> searchMatches = new java.util.ArrayList<>();
+            searchMatches.add(RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(searchText), 2)); // Student Code
+            searchMatches.add(RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(searchText), 3)); // Name
+            searchMatches.add(RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(searchText), 10)); // Received By
+            searchMatches.add(RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(searchText), 17)); // Remarks
+            filters.add(RowFilter.orFilter(searchMatches));
         }
 
         // Receipt number
@@ -791,7 +842,7 @@ public class PaymentPanel extends JPanel {
             "#", "Receipt #", "Student Code", "Student Name", "Program",
             "Remittance Date", "Intel Fee", "T-Shirt", "Penalties", "CIT Night",
             "Received By", "Academic Year", "Charge Term", "Receipt AY", "Receipt Term",
-            "Status", "Total"
+            "Status", "Total", "Remarks"
         };
         private List<Payment> payments = List.of();
         private final DateTimeFormatter dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -825,7 +876,7 @@ public class PaymentPanel extends JPanel {
 
         @Override
         public boolean isCellEditable(int rowIndex, int columnIndex) {
-            return columnIndex == 11 || columnIndex == 12 || columnIndex == 13 || columnIndex == 14;
+            return columnIndex == 11 || columnIndex == 12 || columnIndex == 13 || columnIndex == 14 || columnIndex == 15;
         }
 
         @Override
@@ -875,6 +926,18 @@ public class PaymentPanel extends JPanel {
                     JOptionPane.showMessageDialog(PaymentPanel.this,
                         "Error updating receipt period: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
                 }
+            } else if (columnIndex == 15) {
+                String newStatus = aValue != null ? aValue.toString().trim() : Payment.STATUS_ACTIVE;
+                try {
+                    db.updatePaymentStatus(p.getId(), newStatus, "Edited status in Payments Table", "user");
+                    p.setStatus(newStatus);
+                    fireTableCellUpdated(rowIndex, columnIndex);
+                    fireTableCellUpdated(rowIndex, 16);
+                    refreshData();
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(PaymentPanel.this,
+                        "Error updating payment status: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
             }
         }
 
@@ -907,6 +970,7 @@ public class PaymentPanel extends JPanel {
                     ? p.getReceiptTerm().getLabel() : "Unassigned";
                 case 15: return p.getStatus() != null ? p.getStatus() : "ACTIVE";
                 case 16: return p.getTotalAmount();
+                case 17: return p.getRemarks() != null ? p.getRemarks() : "";
                 default: return null;
             }
         }
@@ -925,6 +989,7 @@ public class PaymentPanel extends JPanel {
     private static class StatusCellRenderer extends DefaultTableCellRenderer {
         private static final Color ACTIVE_COLOR = new Color(166, 227, 161);
         private static final Color VOID_COLOR = new Color(243, 139, 168);
+        private static final Color REFUND_COLOR = new Color(250, 179, 135);
         private Font boldFont = null;
 
         public StatusCellRenderer() {
@@ -944,7 +1009,13 @@ public class PaymentPanel extends JPanel {
             if (value != null) {
                 String status = value.toString();
                 if (!isSelected) {
-                    setForeground("ACTIVE".equals(status) ? ACTIVE_COLOR : VOID_COLOR);
+                    if (Payment.STATUS_REFUNDED.equalsIgnoreCase(status)) {
+                        setForeground(REFUND_COLOR);
+                    } else if (Payment.STATUS_VOID.equalsIgnoreCase(status)) {
+                        setForeground(VOID_COLOR);
+                    } else {
+                        setForeground(ACTIVE_COLOR);
+                    }
                 }
                 setText(status);
             }

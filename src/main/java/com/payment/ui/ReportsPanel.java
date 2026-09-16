@@ -1,6 +1,7 @@
 package com.payment.ui;
 
 import com.payment.ChargeAcademicTerm;
+import com.payment.NameNormalizer;
 import com.payment.Payment;
 import com.payment.Student;
 import com.payment.database.DatabaseManager;
@@ -27,6 +28,8 @@ public class ReportsPanel extends JPanel {
     private final DatabaseManager db;
 
     private JComboBox<String> reportTypeCombo;
+    private JLabel categoryLabel;
+    private JComboBox<String> categoryFilter;
     private JTextField dateFromField;
     private JTextField dateToField;
     private JComboBox<String> programFilter;
@@ -91,6 +94,7 @@ public class ReportsPanel extends JPanel {
 
         reportTypeCombo = new JComboBox<>(new String[]{
             "Student Payment Report (Separated per Term)",
+            "Single Category Payment Report",
             "Academic Term Report (Fee Attribution)",
             "Collection Summary",
             "Remittance Report",
@@ -98,8 +102,33 @@ public class ReportsPanel extends JPanel {
             "Import Batch Report"
         });
         reportTypeCombo.setPreferredSize(new Dimension(300, 30));
-        reportTypeCombo.addActionListener(e -> generateReport());
+        reportTypeCombo.addActionListener(e -> {
+            updateCategoryFilterState();
+            generateReport();
+        });
         row1.add(reportTypeCombo);
+
+        categoryLabel = new JLabel("Category:");
+        categoryLabel.setFont(categoryLabel.getFont().deriveFont(Font.BOLD, 12f));
+        categoryLabel.setForeground(ThemeUtils.NEON_AMBER);
+        categoryLabel.setEnabled(false);
+        row1.add(categoryLabel);
+
+        categoryFilter = new JComboBox<>(new String[]{
+            "T-Shirt Sizing",
+            "Intel Fee",
+            "Penalties",
+            "CIT Night"
+        });
+        categoryFilter.setPreferredSize(new Dimension(140, 30));
+        categoryFilter.setEnabled(false);
+        categoryFilter.addActionListener(e -> {
+            if (isSingleCategoryMode()) {
+                generateReport();
+            }
+        });
+        row1.add(categoryFilter);
+
         controlsPanel.add(row1);
 
         // Row 2: Real-time Filters
@@ -221,6 +250,17 @@ public class ReportsPanel extends JPanel {
         return l;
     }
 
+    private boolean isSingleCategoryMode() {
+        String rt = (String) reportTypeCombo.getSelectedItem();
+        return rt != null && rt.contains("Single Category");
+    }
+
+    private void updateCategoryFilterState() {
+        boolean active = isSingleCategoryMode();
+        if (categoryLabel != null) categoryLabel.setEnabled(active);
+        if (categoryFilter != null) categoryFilter.setEnabled(active);
+    }
+
     public void refreshData() {
         SwingWorker<Void, Void> worker = new SwingWorker<>() {
             private List<String> programs = List.of();
@@ -323,12 +363,18 @@ public class ReportsPanel extends JPanel {
                 // Keep term-based reports synchronized with the declarations
                 // currently stored in Settings, including payments imported
                 // before a rule was added or edited.
-                if (reportType.contains("Student Payment Report") || reportType.contains("Academic Term Report")) {
+                if (reportType.contains("Student Payment Report") || reportType.contains("Academic Term Report") || reportType.contains("Single Category")) {
                     db.refreshFeeTermAssignments();
                 }
                 if (reportType.contains("Student Payment Report")) {
                     data = generateStudentPaymentReportSeparatedByTerm();
                     columns = new String[]{"Academic Year", "Term", "Student Code", "Name", "Program", "Receipt #", "Receipt AY", "Receipt Term", "Date", "Intel Fee", "T-Shirt", "Penalties", "CIT Night", "Received By", "Term Total"};
+                } else if (reportType.contains("Single Category")) {
+                    String cat = (String) categoryFilter.getSelectedItem();
+                    if (cat == null) cat = "T-Shirt Sizing";
+                    SingleCategoryResult res = generateSingleCategoryReport(cat);
+                    data = res.data;
+                    columns = res.columns;
                 } else if (reportType.contains("Academic Term Report")) {
                     data = generateAcademicTermReport();
                     columns = new String[]{"Academic Year", "Term", "Intel Fee", "T-Shirt", "Penalties", "CIT Night", "Total Amount"};
@@ -350,6 +396,7 @@ public class ReportsPanel extends JPanel {
                 for (Map<String, Object> row : data) {
                     Object tot = row.get("Total Amount");
                     if (tot == null) tot = row.get("Term Total");
+                    if (tot == null) tot = row.get("Total Paid");
                     if (tot == null && row.containsKey("Amount") && !"TOTAL".equals(row.get("Category"))) tot = row.get("Amount");
                     if (tot instanceof Number n) {
                         grandTotal += n.doubleValue();
@@ -389,14 +436,19 @@ public class ReportsPanel extends JPanel {
 
         for (int i = 0; i < reportTable.getColumnCount(); i++) {
             String name = reportTable.getColumnName(i);
-            if (name.contains("Amount") || name.contains("Total") || name.equals("Intel Fee") || name.equals("T-Shirt") || name.equals("Penalties") || name.equals("CIT Night")) {
+            if (name.contains("Amount") || name.contains("Total") || name.contains("Payment") || name.equals("Intel Fee") || name.equals("T-Shirt") || name.equals("Penalties") || name.equals("CIT Night")) {
                 reportTable.getColumnModel().getColumn(i).setCellRenderer(currencyRenderer);
             } else if (name.contains("Count") || name.contains("Records") || name.equals("New") || name.equals("Duplicates") || name.equals("Conflicts") || name.equals("Errors")) {
                 reportTable.getColumnModel().getColumn(i).setCellRenderer(rightRenderer);
-            } else if (name.contains("Date") || name.equals("Academic Year") || name.equals("Term") || name.startsWith("Receipt") || name.equals("Student Code") || name.equals("Status") || name.equals("Batch Code")) {
+            } else if (name.contains("Date") || name.equals("Academic Year") || name.equals("Term") || name.contains("Receipt") || name.equals("Student Code") || name.equals("Status") || name.equals("Batch Code") || name.equals("#")) {
                 reportTable.getColumnModel().getColumn(i).setCellRenderer(centerCyanRenderer);
             } else {
                 reportTable.getColumnModel().getColumn(i).setCellRenderer(defaultRenderer);
+            }
+
+            if (name.equals("#")) {
+                reportTable.getColumnModel().getColumn(i).setPreferredWidth(45);
+                reportTable.getColumnModel().getColumn(i).setMaxWidth(60);
             }
         }
     }
@@ -514,6 +566,203 @@ public class ReportsPanel extends JPanel {
         return records;
     }
 
+    static class SingleCategoryResult {
+        final List<Map<String, Object>> data;
+        final String[] columns;
+
+        SingleCategoryResult(List<Map<String, Object>> data, String[] columns) {
+            this.data = data;
+            this.columns = columns;
+        }
+    }
+
+    private static String getOrdinalSuffix(int n) {
+        if (n >= 11 && n <= 13) return "th";
+        switch (n % 10) {
+            case 1: return "st";
+            case 2: return "nd";
+            case 3: return "rd";
+            default: return "th";
+        }
+    }
+
+    private double getCategoryAmount(Payment p, String category) {
+        if (category == null) return 0.0;
+        String c = category.trim().toLowerCase();
+        if (c.contains("intel")) {
+            return p.getIntelFee() != null ? p.getIntelFee() : 0.0;
+        } else if (c.contains("shirt") || c.contains("tshirt")) {
+            return p.getTshirtSizing() != null ? p.getTshirtSizing() : 0.0;
+        } else if (c.contains("penalt")) {
+            return p.getPenalties() != null ? p.getPenalties() : 0.0;
+        } else if (c.contains("night")) {
+            return p.getCitNight() != null ? p.getCitNight() : 0.0;
+        }
+        return 0.0;
+    }
+
+    /**
+     * Generates an alphabetical roster for a single category of payment.
+     * Multiple payments for the same category (e.g. downpayment + balance) are shown
+     * together on the same record line alongside the first payment.
+     */
+    SingleCategoryResult generateSingleCategoryReport(String category) throws Exception {
+        List<Payment> payments = getFilteredPayments();
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        String selectedYear = (String) yearFilter.getSelectedItem();
+        String selectedTerm = (String) termFilter.getSelectedItem();
+        final String fYear = (selectedYear != null && !"All AY".equals(selectedYear)) ? selectedYear : null;
+        final String fTerm = (selectedTerm != null && !"All Terms".equals(selectedTerm)) ? selectedTerm : null;
+
+        class StudentGroup {
+            String studentId;
+            String name;
+            String program;
+            final List<Payment> payments = new ArrayList<>();
+        }
+
+        Map<String, StudentGroup> groupMap = new LinkedHashMap<>();
+
+        for (Payment p : payments) {
+            if (!p.isActive()) continue;
+            double amt = getCategoryAmount(p, category);
+            if (amt <= 0) continue;
+
+            if (fYear != null) {
+                String ay = p.getEffectiveAyForCategory(category);
+                if (ay == null || !ay.equalsIgnoreCase(fYear)) continue;
+            }
+            if (fTerm != null) {
+                ChargeAcademicTerm catTerm = p.getEffectiveTermForCategory(category);
+                String termLabel = catTerm != null ? catTerm.getLabel() : "Unassigned";
+                if (!termLabel.equalsIgnoreCase(fTerm)) continue;
+            }
+
+            String key = (p.getStudentId() != null && !p.getStudentId().isBlank())
+                ? p.getStudentId().trim()
+                : (p.getName() != null ? NameNormalizer.normalize(p.getName()) : "");
+            if (key.isEmpty()) {
+                key = "id_" + p.getId();
+            }
+
+            StudentGroup group = groupMap.computeIfAbsent(key, k -> {
+                StudentGroup sg = new StudentGroup();
+                sg.studentId = p.getStudentId();
+                sg.name = p.getName() != null ? p.getName().trim() : "Unknown";
+                sg.program = p.getProgram() != null ? p.getProgram().trim() : "-";
+                return sg;
+            });
+
+            if ((group.name == null || group.name.equalsIgnoreCase("Unknown")) && p.getName() != null) {
+                group.name = p.getName().trim();
+            }
+            if ((group.program == null || "-".equals(group.program)) && p.getProgram() != null && !p.getProgram().isBlank()) {
+                group.program = p.getProgram().trim();
+            }
+
+            group.payments.add(p);
+        }
+
+        // Sort groups alphabetically by student name (A-Z)
+        List<StudentGroup> sortedGroups = new ArrayList<>(groupMap.values());
+        sortedGroups.sort(Comparator.comparing(
+            g -> g.name != null ? g.name.trim() : "",
+            String.CASE_INSENSITIVE_ORDER
+        ));
+
+        // Determine max payment count among all students in this report
+        int maxPayments = 1;
+        for (StudentGroup g : sortedGroups) {
+            if (g.payments.size() > maxPayments) {
+                maxPayments = g.payments.size();
+            }
+        }
+        int paymentSlots = Math.max(2, maxPayments);
+
+        // Build columns dynamically
+        List<String> colList = new ArrayList<>();
+        colList.add("#");
+        colList.add("Receipt #");
+        colList.add("Student Name");
+        colList.add("Program");
+        colList.add("1st Payment");
+        for (int i = 2; i <= paymentSlots; i++) {
+            String suffix = getOrdinalSuffix(i);
+            colList.add(i + suffix + " Receipt #");
+            colList.add(i + suffix + " Payment");
+        }
+        colList.add("Total Paid");
+        colList.add("Remarks");
+        colList.add("Date");
+
+        String[] columns = colList.toArray(new String[0]);
+        List<Map<String, Object>> records = new ArrayList<>();
+
+        int rowNum = 0;
+        for (StudentGroup g : sortedGroups) {
+            rowNum++;
+            // Sort payments chronologically, then by receipt number
+            g.payments.sort(Comparator
+                .comparing(Payment::getRemittanceDate, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparingInt(Payment::getReceiptNumber)
+                .thenComparingInt(Payment::getId)
+            );
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("#", rowNum);
+
+            Payment p1 = g.payments.get(0);
+            row.put("Receipt #", p1.getReceiptNumber() > 0 ? p1.getReceiptNumber() : null);
+            row.put("Student Name", g.name);
+            row.put("Program", g.program != null && !g.program.isBlank() ? g.program : "-");
+            row.put("1st Payment", getCategoryAmount(p1, category));
+
+            for (int i = 2; i <= paymentSlots; i++) {
+                String suffix = getOrdinalSuffix(i);
+                String recCol = i + suffix + " Receipt #";
+                String amtCol = i + suffix + " Payment";
+                if (g.payments.size() >= i) {
+                    Payment pi = g.payments.get(i - 1);
+                    row.put(recCol, pi.getReceiptNumber() > 0 ? pi.getReceiptNumber() : null);
+                    row.put(amtCol, getCategoryAmount(pi, category));
+                } else {
+                    row.put(recCol, null);
+                    row.put(amtCol, null);
+                }
+            }
+
+            double totalPaid = g.payments.stream()
+                .mapToDouble(p -> getCategoryAmount(p, category))
+                .sum();
+            row.put("Total Paid", totalPaid);
+
+            // Deduplicated remarks
+            List<String> rems = new ArrayList<>();
+            for (Payment p : g.payments) {
+                if (p.getRemarks() != null && !p.getRemarks().trim().isEmpty()) {
+                    String r = p.getRemarks().trim();
+                    if (!rems.contains(r)) rems.add(r);
+                }
+            }
+            row.put("Remarks", String.join("; ", rems));
+
+            // Deduplicated dates
+            List<String> dates = new ArrayList<>();
+            for (Payment p : g.payments) {
+                if (p.getRemittanceDate() != null) {
+                    String dStr = p.getRemittanceDate().format(fmt);
+                    if (!dates.contains(dStr)) dates.add(dStr);
+                }
+            }
+            row.put("Date", dates.isEmpty() ? "-" : String.join(", ", dates));
+
+            records.add(row);
+        }
+
+        return new SingleCategoryResult(records, columns);
+    }
+
     /**
      * Itemized Academic Term Report:
      * Calculates fee collections strictly separated per (AY, Term).
@@ -613,19 +862,19 @@ public class ReportsPanel extends JPanel {
         List<Payment> payments = getFilteredPayments();
 
         double intelTotal = payments.stream()
-            .filter(p -> "ACTIVE".equals(p.getStatus()))
-            .mapToDouble(p -> p.getIntelFee() != null ? p.getIntelFee() : 0).sum();
+            .filter(p -> p.isActive() || p.isRefunded())
+            .mapToDouble(p -> (p.getIntelFee() != null ? p.getIntelFee() : 0) * (p.isRefunded() ? -1.0 : 1.0)).sum();
         double tshirtTotal = payments.stream()
-            .filter(p -> "ACTIVE".equals(p.getStatus()))
-            .mapToDouble(p -> p.getTshirtSizing() != null ? p.getTshirtSizing() : 0).sum();
+            .filter(p -> p.isActive() || p.isRefunded())
+            .mapToDouble(p -> (p.getTshirtSizing() != null ? p.getTshirtSizing() : 0) * (p.isRefunded() ? -1.0 : 1.0)).sum();
         double penaltiesTotal = payments.stream()
-            .filter(p -> "ACTIVE".equals(p.getStatus()))
-            .mapToDouble(p -> p.getPenalties() != null ? p.getPenalties() : 0).sum();
+            .filter(p -> p.isActive() || p.isRefunded())
+            .mapToDouble(p -> (p.getPenalties() != null ? p.getPenalties() : 0) * (p.isRefunded() ? -1.0 : 1.0)).sum();
         double citTotal = payments.stream()
-            .filter(p -> "ACTIVE".equals(p.getStatus()))
-            .mapToDouble(p -> p.getCitNight() != null ? p.getCitNight() : 0).sum();
+            .filter(p -> p.isActive() || p.isRefunded())
+            .mapToDouble(p -> (p.getCitNight() != null ? p.getCitNight() : 0) * (p.isRefunded() ? -1.0 : 1.0)).sum();
         double grandTotal = payments.stream()
-            .filter(p -> "ACTIVE".equals(p.getStatus()))
+            .filter(p -> p.isActive() || p.isRefunded())
             .mapToDouble(Payment::getTotalAmount).sum();
 
         Map<String, Object> row1 = new LinkedHashMap<>();
@@ -655,7 +904,7 @@ public class ReportsPanel extends JPanel {
         List<Payment> payments = getFilteredPayments();
 
         Map<LocalDate, List<Payment>> byDate = payments.stream()
-            .filter(p -> p.getRemittanceDate() != null && "ACTIVE".equals(p.getStatus()))
+            .filter(p -> p.getRemittanceDate() != null && (p.isActive() || p.isRefunded()))
             .collect(Collectors.groupingBy(Payment::getRemittanceDate));
 
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -677,7 +926,7 @@ public class ReportsPanel extends JPanel {
         List<Payment> payments = getFilteredPayments();
 
         Map<String, List<Payment>> byReceiver = payments.stream()
-            .filter(p -> "ACTIVE".equals(p.getStatus()))
+            .filter(p -> p.isActive() || p.isRefunded())
             .collect(Collectors.groupingBy(p -> p.getReceivedBy() != null ? p.getReceivedBy() : "Unknown"));
 
         return byReceiver.entrySet().stream()
@@ -746,6 +995,9 @@ public class ReportsPanel extends JPanel {
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("CSV Files", "csv"));
         String reportType = (String) reportTypeCombo.getSelectedItem();
         String safeName = reportType != null ? reportType.replaceAll("[^a-zA-Z0-9]", "_") : "Report";
+        if (isSingleCategoryMode() && categoryFilter != null && categoryFilter.getSelectedItem() != null) {
+            safeName += "_" + categoryFilter.getSelectedItem().toString().replaceAll("[^a-zA-Z0-9]", "_");
+        }
         fileChooser.setSelectedFile(new File(safeName + "_" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + ".csv"));
 
         int result = fileChooser.showSaveDialog(this);
@@ -788,6 +1040,9 @@ public class ReportsPanel extends JPanel {
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Excel Files (*.xlsx)", "xlsx"));
         String reportType = (String) reportTypeCombo.getSelectedItem();
         String safeName = reportType != null ? reportType.replaceAll("[^a-zA-Z0-9]", "_") : "Report";
+        if (isSingleCategoryMode() && categoryFilter != null && categoryFilter.getSelectedItem() != null) {
+            safeName += "_" + categoryFilter.getSelectedItem().toString().replaceAll("[^a-zA-Z0-9]", "_");
+        }
         fileChooser.setSelectedFile(new File(safeName + "_" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + ".xlsx"));
 
         int result = fileChooser.showSaveDialog(this);

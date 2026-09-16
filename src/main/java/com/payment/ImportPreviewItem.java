@@ -15,6 +15,8 @@ public class ImportPreviewItem {
     public static final String STATUS_CONFLICT = "CONFLICT";
     public static final String STATUS_AMBIGUOUS = "AMBIGUOUS";
     public static final String STATUS_ERROR = "ERROR";
+    public static final String STATUS_VOID = "VOID";
+    public static final String STATUS_REFUNDED = "REFUNDED";
 
     private int rowNumber;              // Excel row number (1-based, excluding header)
     private int receiptNumber;
@@ -150,9 +152,17 @@ public class ImportPreviewItem {
     public boolean isConflict() { return STATUS_CONFLICT.equals(status); }
     public boolean isAmbiguous() { return STATUS_AMBIGUOUS.equals(status); }
     public boolean isError() { return STATUS_ERROR.equals(status); }
+    public boolean isVoid() { return STATUS_VOID.equals(status); }
+    public boolean isRefunded() { return STATUS_REFUNDED.equals(status); }
     public boolean requiresReview() { return isConflict() || isAmbiguous() || isError(); }
 
     public double getTotalAmount() {
+        if (isVoid()) return 0.0;
+        if (isRefunded()) return -getFaceAmount();
+        return getFaceAmount();
+    }
+
+    public double getFaceAmount() {
         double total = 0;
         if (intelFee != null) total += intelFee;
         if (tshirtSizing != null) total += tshirtSizing;

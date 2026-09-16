@@ -245,11 +245,13 @@ public class ImportDialog extends JDialog {
         previewTable.getColumnModel().getColumn(4).setPreferredWidth(100);  // Amount
         previewTable.getColumnModel().getColumn(5).setPreferredWidth(100);  // Status
         previewTable.getColumnModel().getColumn(6).setPreferredWidth(130);  // Charge Term
-        previewTable.getColumnModel().getColumn(7).setPreferredWidth(120);  // Matched Student
-        previewTable.getColumnModel().getColumn(8).setPreferredWidth(200);  // Details
-        previewTable.getColumnModel().getColumn(9).setPreferredWidth(160);  // Source file
-        previewTable.getColumnModel().getColumn(10).setPreferredWidth(170); // Receipt period
-        previewTable.getColumnModel().getColumn(11).setPreferredWidth(130); // Remittance date
+        previewTable.getColumnModel().getColumn(7).setPreferredWidth(100);  // Received By
+        previewTable.getColumnModel().getColumn(8).setPreferredWidth(130);  // Remarks
+        previewTable.getColumnModel().getColumn(9).setPreferredWidth(120);  // Matched Student
+        previewTable.getColumnModel().getColumn(10).setPreferredWidth(200); // Details
+        previewTable.getColumnModel().getColumn(11).setPreferredWidth(160); // Source file
+        previewTable.getColumnModel().getColumn(12).setPreferredWidth(170); // Receipt period
+        previewTable.getColumnModel().getColumn(13).setPreferredWidth(130); // Remittance date
 
         // Custom renderer for status column
         previewTable.getColumnModel().getColumn(5).setCellRenderer(new StatusCellRenderer());
@@ -671,7 +673,7 @@ public class ImportDialog extends JDialog {
     private static class PreviewTableModel extends AbstractTableModel {
         private static final String[] COLUMN_NAMES = {
             "Row", "Receipt #", "Student Name", "Program", "Amount", "Status",
-            "Charge Term", "Matched Student", "Details", "Source File", "Receipt Period", "Remittance Date"
+            "Charge Term", "Received By", "Remarks", "Matched Student", "Details", "Source File", "Receipt Period", "Remittance Date"
         };
 
         private List<ImportPreviewItem> items;
@@ -719,14 +721,16 @@ public class ImportDialog extends JDialog {
                 case 4: return String.format("₱%,.2f", item.getTotalAmount());
                 case 5: return item.getStatus();
                 case 6: return item.getChargeAcademicTerm().getLabel();
-                case 7: return item.getMatchedStudentName() != null ?
+                case 7: return item.getReceivedBy() != null ? item.getReceivedBy() : "";
+                case 8: return item.getRemarks() != null ? item.getRemarks() : "";
+                case 9: return item.getMatchedStudentName() != null ?
                     item.getMatchedStudentCode() + " - " + item.getMatchedStudentName() :
                     (item.getProposedStudentCode() != null ? item.getProposedStudentCode() + " (new)" : "");
-                case 8: return getDetails(item);
-                case 9: return item.getSourceFileName() != null ? item.getSourceFileName() : "";
-                case 10: return item.getReceiptNumber() > 0
+                case 10: return getDetails(item);
+                case 11: return item.getSourceFileName() != null ? item.getSourceFileName() : "";
+                case 12: return item.getReceiptNumber() > 0
                     ? item.getReceiptKey().displayScope() : "Not applicable";
-                case 11: return item.getRemittanceDate() != null ? item.getRemittanceDate().toString() : "";
+                case 13: return item.getRemittanceDate() != null ? item.getRemittanceDate().toString() : "";
                 default: return null;
             }
         }
@@ -756,6 +760,12 @@ public class ImportDialog extends JDialog {
             }
             if (item.isAmbiguous()) {
                 return "AMBIGUOUS: " + item.getAmbiguousMatches().size() + " students match this name";
+            }
+            if (item.isVoid()) {
+                return "VOID: Receipt marked as void due to remarks (\"" + item.getRemarks() + "\")";
+            }
+            if (item.isRefunded()) {
+                return "REFUNDED: Marked as refund due to remarks (\"" + item.getRemarks() + "\") - will subtract from totals";
             }
             if (item.isDuplicate()) {
                 return "EXACT DUPLICATE - will be skipped";
@@ -790,6 +800,8 @@ public class ImportDialog extends JDialog {
             STATUS_COLORS.put(ImportPreviewItem.STATUS_CONFLICT, new Color(255, 140, 0));
             STATUS_COLORS.put(ImportPreviewItem.STATUS_AMBIGUOUS, ThemeUtils.NEON_ROSE);
             STATUS_COLORS.put(ImportPreviewItem.STATUS_ERROR, ThemeUtils.NEON_ROSE);
+            STATUS_COLORS.put(ImportPreviewItem.STATUS_VOID, new Color(243, 139, 168));
+            STATUS_COLORS.put(ImportPreviewItem.STATUS_REFUNDED, new Color(250, 179, 135));
         }
 
         @Override

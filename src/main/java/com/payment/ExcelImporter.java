@@ -38,18 +38,21 @@ public class ExcelImporter {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
 
-                // Read cells based on the exact spreadsheet format
-                // Columns: # | Receipt # | Name | Program | Intel Fee | Tshirt Sizing | Penalties | CIT Night | Received by | Remarks
-                Cell receiptCell = row.getCell(1);
-                Cell nameCell = row.getCell(2);
-                Cell programCell = row.getCell(3);
-                Cell intelFeeCell = row.getCell(4);
-                Cell tshirtCell = row.getCell(5);
-                Cell penaltiesCell = row.getCell(6);
-                Cell citNightCell = row.getCell(7);
-                Cell receivedByCell = row.getCell(8);
-                Cell remarksCell = row.getCell(9);
-                Cell chargeTermCell = row.getCell(10); // Optional: CURRENT/PREVIOUS/UNASSIGNED
+                // Read cells based on header mapping if available, with robust fallbacks
+                boolean hasOthers = headers.containsKey("others") || headers.containsKey("other");
+                int defaultRecByCol = hasOthers ? 9 : 8;
+                int defaultRemCol = hasOthers ? 10 : 9;
+
+                Cell receiptCell = optionalCell(row, headers, 1, "receipt", "receipt no", "receipt number", "or no", "or number");
+                Cell nameCell = optionalCell(row, headers, 2, "name", "student name");
+                Cell programCell = optionalCell(row, headers, 3, "program", "course", "year program", "program year");
+                Cell intelFeeCell = optionalCell(row, headers, 4, "intel fee", "intel");
+                Cell tshirtCell = optionalCell(row, headers, 5, "tshirt sizing", "t shirt sizing", "tshirt", "t shirt", "shirt");
+                Cell penaltiesCell = optionalCell(row, headers, 6, "penalties", "penalty");
+                Cell citNightCell = optionalCell(row, headers, 7, "cit night", "citnight", "night");
+                Cell receivedByCell = optionalCell(row, headers, defaultRecByCol, "received by", "received", "receivedby", "receiver");
+                Cell remarksCell = optionalCell(row, headers, defaultRemCol, "remarks", "remark", "note", "notes", "comments");
+                Cell chargeTermCell = optionalCell(row, headers, -1, "charge term", "charge academic term");
                 Cell intelTermCell = optionalCell(row, headers, 11, "intel fee term", "intel term");
                 Cell intelAyCell = optionalCell(row, headers, 12, "intel fee ay", "intel ay", "intel academic year");
                 Cell tshirtTermCell = optionalCell(row, headers, 13, "t shirt term", "tshirt term", "t shirt sizing term");
@@ -95,6 +98,11 @@ public class ExcelImporter {
                 Payment payment = new Payment(receiptNumber, name, program,
                         intelFee, tshirtSizing, penalties, citNight,
                         receivedBy, remarks);
+                if (VoidReceiptRule.isVoidDueToRemarks(remarks)) {
+                    payment.setStatus(Payment.STATUS_VOID);
+                } else if (RefundReceiptRule.isRefundDueToRemarks(remarks)) {
+                    payment.setStatus(Payment.STATUS_REFUNDED);
+                }
                 payment.setRemittanceDate(remittanceDate);
                 payment.setChargeAcademicTerm(chargeTerm);
                 payment.setIntelFeeTerm(parseOptionalTerm(intelTermCell)); payment.setIntelFeeAy(getOptionalString(intelAyCell));
@@ -176,7 +184,7 @@ public class ExcelImporter {
             Integer index = headers.get(name);
             if (index != null) return row.getCell(index);
         }
-        return row.getCell(fallback);
+        return fallback >= 0 ? row.getCell(fallback) : null;
     }
 
     private static String getOptionalString(Cell cell) {

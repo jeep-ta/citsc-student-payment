@@ -6,6 +6,9 @@ import java.time.LocalDateTime;
 public class Payment {
     public static final String STATUS_ACTIVE = "ACTIVE";
     public static final String STATUS_VOID = "VOID";
+    public static final String STATUS_VOIDED = "VOIDED";
+    public static final String STATUS_REFUNDED = "REFUNDED";
+    public static final String STATUS_REFUND = "REFUND";
 
     private int id;                   // Database primary key
     private int receiptNumber;        // 0 means this remittance has no receipt
@@ -152,11 +155,23 @@ public class Payment {
     public ReceiptKey getReceiptKey() { return ReceiptKey.from(this); }
 
     public boolean isVoid() {
-        return STATUS_VOID.equals(status);
+        return STATUS_VOID.equalsIgnoreCase(status) || STATUS_VOIDED.equalsIgnoreCase(status);
+    }
+
+    public boolean isRefunded() {
+        return STATUS_REFUNDED.equalsIgnoreCase(status) || STATUS_REFUND.equalsIgnoreCase(status);
     }
 
     public boolean isActive() {
-        return STATUS_ACTIVE.equals(status);
+        return status == null || STATUS_ACTIVE.equalsIgnoreCase(status);
+    }
+
+    public static String normalizeStatus(String raw) {
+        if (raw == null || raw.isBlank()) return STATUS_ACTIVE;
+        String s = raw.trim().toUpperCase();
+        if (s.startsWith("VOID")) return STATUS_VOID;
+        if (s.startsWith("REFUND")) return STATUS_REFUNDED;
+        return STATUS_ACTIVE;
     }
 
     public ChargeAcademicTerm getChargeAcademicTerm() {
@@ -384,6 +399,17 @@ public class Payment {
 
     // --- Business logic ---
     public double getTotalAmount() {
+        if (isVoid()) {
+            return 0.0;
+        }
+        if (isRefunded()) {
+            return -getFaceAmount();
+        }
+        return getFaceAmount();
+    }
+
+    /** Returns the sum of fee items regardless of void status (useful for audit provenance). */
+    public double getFaceAmount() {
         double total = 0;
         if (intelFee != null) total += intelFee;
         if (tshirtSizing != null) total += tshirtSizing;
@@ -393,6 +419,7 @@ public class Payment {
     }
 
     public boolean hasPayment() {
+        if (isVoid()) return false;
         return intelFee != null || tshirtSizing != null || penalties != null || citNight != null;
     }
 

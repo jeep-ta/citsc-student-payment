@@ -157,6 +157,11 @@ public class ImportService {
                         item.setTshirtTerm(payment.getTshirtTerm()); item.setTshirtAy(payment.getTshirtAy());
                         item.setPenaltiesTerm(payment.getPenaltiesTerm()); item.setPenaltiesAy(payment.getPenaltiesAy());
                         item.setCitNightTerm(payment.getCitNightTerm()); item.setCitNightAy(payment.getCitNightAy());
+                        if (payment.isVoid() || VoidReceiptRule.isVoidDueToRemarks(payment.getRemarks())) {
+                            item.setStatus(ImportPreviewItem.STATUS_VOID);
+                        } else if (payment.isRefunded() || RefundReceiptRule.isRefundDueToRemarks(payment.getRemarks())) {
+                            item.setStatus(ImportPreviewItem.STATUS_REFUNDED);
+                        }
                         previewItems.add(item);
                     }
                 }
@@ -202,7 +207,7 @@ public class ImportService {
             ? remittanceDates.iterator().next() : null);
         batch.setImportedAt(LocalDateTime.now());
         batch.setTotalRows(previewItems.size());
-        batch.setNewRecords((int) previewItems.stream().filter(ImportPreviewItem::isNew).count());
+        batch.setNewRecords((int) previewItems.stream().filter(item -> item.isNew() || item.isVoid() || item.isRefunded()).count());
         batch.setDuplicateRecords((int) previewItems.stream().filter(ImportPreviewItem::isDuplicate).count());
         batch.setConflictRecords((int) previewItems.stream().filter(ImportPreviewItem::isConflict).count());
         batch.setErrorRecords((int) previewItems.stream().filter(ImportPreviewItem::isError).count());
@@ -303,7 +308,7 @@ public class ImportService {
             if (existing != null) {
                 if (isExactDuplicate(item, existing, snapshot.autoAssign(), snapshot.academicYear())) {
                     item.setStatus(ImportPreviewItem.STATUS_DUPLICATE);
-                } else {
+                } else if (!item.isVoid()) {
                     item.setStatus(ImportPreviewItem.STATUS_CONFLICT);
                     item.setConflictingPayment(existing);
                 }
@@ -325,7 +330,7 @@ public class ImportService {
                 }
                 if (currentPayment.isExactDuplicateOf(firstPayment)) {
                     item.setStatus(ImportPreviewItem.STATUS_DUPLICATE);
-                } else {
+                } else if (!item.isVoid()) {
                     item.setStatus(ImportPreviewItem.STATUS_CONFLICT);
                     item.setConflictingPayment(firstPayment);
                 }
@@ -339,7 +344,9 @@ public class ImportService {
                 .getOrDefault(normalizedName, List.of());
 
             if (matches.isEmpty()) {
-                item.setStatus(ImportPreviewItem.STATUS_NEW);
+                if (!item.isVoid() && !item.isRefunded()) {
+                    item.setStatus(ImportPreviewItem.STATUS_NEW);
+                }
                 String proposedCode = proposedCodes.get(normalizedName);
                 if (proposedCode == null) {
                     proposedCode = StudentCodeGenerator.generate(++nextStudentSequence);
@@ -348,14 +355,18 @@ public class ImportService {
                 item.setProposedStudentCode(proposedCode);
             } else if (matches.size() == 1) {
                 Student matched = matches.get(0);
-                item.setStatus(ImportPreviewItem.STATUS_NEW);
+                if (!item.isVoid() && !item.isRefunded()) {
+                    item.setStatus(ImportPreviewItem.STATUS_NEW);
+                }
                 item.setMatchedStudentCode(matched.getStudentCode());
                 item.setMatchedStudentName(matched.getName());
             } else {
-                item.setStatus(ImportPreviewItem.STATUS_AMBIGUOUS);
+                if (!item.isVoid() && !item.isRefunded()) {
+                    item.setStatus(ImportPreviewItem.STATUS_AMBIGUOUS);
+                }
                 item.setAmbiguousMatches(matches);
             }
-            if (item.getReceiptNumber() > 0) {
+            if (item.getReceiptNumber() > 0 && !item.isVoid()) {
                 firstItemsByReceipt.put(item.getReceiptKey(), item);
             }
         }
@@ -462,6 +473,11 @@ public class ImportService {
         payment.setCitNightTerm(item.getCitNightTerm()); payment.setCitNightAy(item.getCitNightAy());
         payment.setReceiptAcademicYear(item.getReceiptAcademicYear());
         payment.setReceiptTerm(item.getReceiptTerm());
+        if (item.isVoid() || VoidReceiptRule.isVoidDueToRemarks(item.getRemarks())) {
+            payment.setStatus(Payment.STATUS_VOID);
+        } else if (item.isRefunded() || RefundReceiptRule.isRefundDueToRemarks(item.getRemarks())) {
+            payment.setStatus(Payment.STATUS_REFUNDED);
+        }
         return payment;
     }
 
@@ -492,7 +508,7 @@ public class ImportService {
                 .filter(item -> file.getReceiptTerm() == item.getReceiptTerm())
                 .toList();
             file.setTotalRows(fileItems.size());
-            file.setNewRecords((int) fileItems.stream().filter(ImportPreviewItem::isNew).count());
+            file.setNewRecords((int) fileItems.stream().filter(item -> item.isNew() || item.isVoid() || item.isRefunded()).count());
             file.setDuplicateRecords((int) fileItems.stream().filter(ImportPreviewItem::isDuplicate).count());
             file.setConflictRecords((int) fileItems.stream().filter(ImportPreviewItem::isConflict).count());
             file.setErrorRecords((int) fileItems.stream().filter(ImportPreviewItem::isError).count());
@@ -563,7 +579,7 @@ public class ImportService {
                 } else if (item.getMatchedStudentCode() != null) {
                     // Matched existing student
                     studentCode = item.getMatchedStudentCode();
-                } else if (item.isNew()) {
+                } else if (item.isNew() || item.isVoid() || item.isRefunded()) {
                     // New student - check if we already created one for this name in this import
                     String normalizedName = NameNormalizer.normalize(studentName);
                     if (newStudentCodes.containsKey(normalizedName)) {
@@ -613,7 +629,15 @@ public class ImportService {
                     );
                     payment.setStudentId(studentCode);
                     payment.setRemittanceDate(item.getRemittanceDate());
-                    payment.setStatus(Payment.STATUS_ACTIVE);
+                    boolean isVoid = item.isVoid() || VoidReceiptRule.isVoidDueToRemarks(item.getRemarks());
+                    boolean isRefund = item.isRefunded() || RefundReceiptRule.isRefundDueToRemarks(item.getRemarks());
+                    if (isVoid) {
+                        payment.setStatus(Payment.STATUS_VOID);
+                    } else if (isRefund) {
+                        payment.setStatus(Payment.STATUS_REFUNDED);
+                    } else {
+                        payment.setStatus(Payment.STATUS_ACTIVE);
+                    }
                     // Set charge academic term from preview item
                     payment.setChargeAcademicTerm(item.getChargeAcademicTerm());
                     payment.setAcademicYear(item.getAcademicYear());
@@ -633,8 +657,13 @@ public class ImportService {
                     }
                     db.insertPayment(payment);
 
-                    // Log payment creation
-                    auditService.logPaymentCreated(payment, batch.getImportedBy());
+                    // Log payment creation or void
+                    if (isVoid) {
+                        auditService.logPaymentVoided(payment, batch.getImportedBy(),
+                            VoidReceiptRule.getVoidReason(item.getRemarks()));
+                    } else {
+                        auditService.logPaymentCreated(payment, batch.getImportedBy());
+                    }
                 }
             }
 
