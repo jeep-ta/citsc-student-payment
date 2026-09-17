@@ -1949,30 +1949,38 @@ public class DatabaseManager {
         List<FeeTermRule> rules = getFeeTermRules();
         if (rules.isEmpty()) return 0;
         int updated = 0;
-        for (Payment payment : getAllPayments()) {
-            if (!payment.isActive() || payment.getRemittanceDate() == null) continue;
-            boolean changed = false;
-            for (String category : new String[]{FeeTermRule.INTEL_FEE, FeeTermRule.T_SHIRT, FeeTermRule.PENALTIES, FeeTermRule.CIT_NIGHT}) {
-                double amount = switch (category) {
-                    case FeeTermRule.INTEL_FEE -> payment.getIntelFee() == null ? 0 : payment.getIntelFee();
-                    case FeeTermRule.T_SHIRT -> payment.getTshirtSizing() == null ? 0 : payment.getTshirtSizing();
-                    case FeeTermRule.PENALTIES -> payment.getPenalties() == null ? 0 : payment.getPenalties();
-                    default -> payment.getCitNight() == null ? 0 : payment.getCitNight();
-                };
-                if (amount <= 0) continue;
-                FeeTermRule match = null;
-                for (FeeTermRule rule : rules) if (rule.getCategory().equals(category) && rule.matches(payment.getRemittanceDate())) match = rule;
-                if (match == null) continue;
-                // Persist the category tag even when it happens to equal the
-                // payment's default attribution; it must remain independent
-                // if the default is changed later.
-                changed = true;
-                payment.setCategoryAttribution(category, match.getTerm(), match.getAcademicYear());
+        Connection conn = getConnection();
+        boolean origAutoCommit = conn.getAutoCommit();
+        try {
+            conn.setAutoCommit(false);
+            for (Payment payment : getAllPayments()) {
+                if (!payment.isActive() || payment.getRemittanceDate() == null) continue;
+                boolean changed = false;
+                for (String category : new String[]{FeeTermRule.INTEL_FEE, FeeTermRule.T_SHIRT, FeeTermRule.PENALTIES, FeeTermRule.CIT_NIGHT}) {
+                    double amount = switch (category) {
+                        case FeeTermRule.INTEL_FEE -> payment.getIntelFee() == null ? 0 : payment.getIntelFee();
+                        case FeeTermRule.T_SHIRT -> payment.getTshirtSizing() == null ? 0 : payment.getTshirtSizing();
+                        case FeeTermRule.PENALTIES -> payment.getPenalties() == null ? 0 : payment.getPenalties();
+                        default -> payment.getCitNight() == null ? 0 : payment.getCitNight();
+                    };
+                    if (amount <= 0) continue;
+                    FeeTermRule match = null;
+                    for (FeeTermRule rule : rules) if (rule.getCategory().equals(category) && rule.matches(payment.getRemittanceDate())) match = rule;
+                    if (match == null) continue;
+                    changed = true;
+                    payment.setCategoryAttribution(category, match.getTerm(), match.getAcademicYear());
+                }
+                if (changed && updatePaymentItemTerms(payment.getId(), payment.getChargeAcademicTerm(), payment.getAcademicYear(),
+                        payment.getIntelFeeTerm(), payment.getIntelFeeAy(), payment.getTshirtTerm(), payment.getTshirtAy(),
+                        payment.getPenaltiesTerm(), payment.getPenaltiesAy(), payment.getCitNightTerm(), payment.getCitNightAy(),
+                        "Reapplied fee date attribution rules", "system") ) updated++;
             }
-            if (changed && updatePaymentItemTerms(payment.getId(), payment.getChargeAcademicTerm(), payment.getAcademicYear(),
-                    payment.getIntelFeeTerm(), payment.getIntelFeeAy(), payment.getTshirtTerm(), payment.getTshirtAy(),
-                    payment.getPenaltiesTerm(), payment.getPenaltiesAy(), payment.getCitNightTerm(), payment.getCitNightAy(),
-                    "Reapplied fee date attribution rules", "system") ) updated++;
+            conn.commit();
+        } catch (SQLException e) {
+            conn.rollback();
+            throw e;
+        } finally {
+            conn.setAutoCommit(origAutoCommit);
         }
         return updated;
     }
@@ -2082,6 +2090,59 @@ public class DatabaseManager {
 
     public void setAutoAssignCurrentTerm(boolean auto) throws SQLException {
         setAppSetting("auto_assign_current_term", String.valueOf(auto));
+    }
+
+    // ==========================================
+    // Category Full Payment Targets
+    // ==========================================
+
+    public static String normalizeCategoryKey(String category) {
+        if (category == null) return "Unknown";
+        String c = category.trim().toLowerCase();
+        if (c.contains("intel")) return "Intel Fee";
+        if (c.contains("shirt") || c.contains("tshirt")) return "T-Shirt Sizing";
+        if (c.contains("penalt")) return "Penalties";
+        if (c.contains("night")) return "CIT Night";
+        return category.trim();
+    }
+
+    public static double getDefaultCategoryTarget(String category) {
+        String norm = normalizeCategoryKey(category);
+        switch (norm) {
+            case "Intel Fee": return 150.0;
+            case "T-Shirt Sizing": return 500.0;
+            case "CIT Night": return 200.0;
+            case "Penalties": return 50.0;
+            default: return 0.0;
+        }
+    }
+
+    public double getCategoryFullTarget(String category) {
+        return getCategoryFullTarget(category, getDefaultCategoryTarget(category));
+    }
+
+    public double getCategoryFullTarget(String category, double defaultTarget) {
+        String key = "category_full_target_" + normalizeCategoryKey(category);
+        try {
+            String val = getAppSetting(key, null);
+            if (val != null && !val.isBlank()) {
+                return Double.parseDouble(val.trim());
+            }
+        } catch (Exception ignored) {}
+        return defaultTarget;
+    }
+
+    public void setCategoryFullTarget(String category, double target) throws SQLException {
+        String key = "category_full_target_" + normalizeCategoryKey(category);
+        setAppSetting(key, String.format(java.util.Locale.US, "%.2f", Math.max(0, target)));
+    }
+
+    public Map<String, Double> getAllCategoryFullTargets() {
+        Map<String, Double> targets = new LinkedHashMap<>();
+        for (String cat : List.of("Intel Fee", "T-Shirt Sizing", "CIT Night", "Penalties")) {
+            targets.put(cat, getCategoryFullTarget(cat));
+        }
+        return targets;
     }
 
     // ==========================================

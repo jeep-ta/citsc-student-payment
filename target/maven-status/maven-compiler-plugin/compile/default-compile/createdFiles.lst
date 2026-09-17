@@ -115,6 +115,7 @@ com\payment\ImportPreviewItem.class
 com\payment\VoidReceiptRule.class
 com\payment\StudentPaymentApp$1.class
 com\payment\ui\MergeStudentsDialog$ThresholdOption.class
+com\payment\ui\ReportsPanel$CyberStatusCellRenderer.class
 com\payment\RefundReceiptRule.class
 com\payment\ImportDialog$2.class
 com\payment\ui\DashboardPanel$AuditTableModel.class

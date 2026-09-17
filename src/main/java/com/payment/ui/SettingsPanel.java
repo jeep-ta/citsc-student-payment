@@ -44,6 +44,13 @@ public class SettingsPanel extends JPanel {
     private FeeRulesTableModel feeRulesTableModel;
     private JTable feeRulesTable;
 
+    // Category Full Payment Targets
+    private JSpinner intelTargetSpinner;
+    private JSpinner tshirtTargetSpinner;
+    private JSpinner citNightTargetSpinner;
+    private JSpinner penaltiesTargetSpinner;
+    private JLabel categoryTargetStatusLabel;
+
     public SettingsPanel() {
         this.db = DatabaseManager.getInstance();
         initializeUI();
@@ -89,6 +96,10 @@ public class SettingsPanel extends JPanel {
         contentPanel.add(Box.createVerticalStrut(16));
 
         contentPanel.add(createSection("Fee Category Date Rules", ThemeUtils.NEON_BLUE, createFeeRulesPanel()));
+        contentPanel.add(Box.createVerticalStrut(16));
+
+        // Category Full Payment Targets
+        contentPanel.add(createSection("💵 Category Full Payment Targets", ThemeUtils.NEON_GREEN, createCategoryTargetsPanel()));
         contentPanel.add(Box.createVerticalStrut(16));
 
         // 2. General Settings
@@ -505,6 +516,108 @@ public class SettingsPanel extends JPanel {
         return panel;
     }
 
+    private JPanel createCategoryTargetsPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBackground(ThemeUtils.BG_CARD);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(6, 0, 6, 12);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        // Hint label
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+        JLabel hintLabel = new JLabel("<html>Define standard full payment targets per category. In Single Category Reports, students will be classified as <b>Fully Paid</b>, <b>Partially Paid</b>, or <b>Overpaid</b> based on these thresholds.</html>");
+        hintLabel.setFont(hintLabel.getFont().deriveFont(Font.PLAIN, 11f));
+        hintLabel.setForeground(ThemeUtils.TEXT_SECONDARY);
+        panel.add(hintLabel, gbc);
+        gbc.gridwidth = 1;
+
+        // Intel Fee
+        gbc.gridx = 0; gbc.gridy = 1;
+        JLabel intelLbl = new JLabel("Intel Fee Target (₱):");
+        intelLbl.setForeground(ThemeUtils.TEXT_PRIMARY);
+        panel.add(intelLbl, gbc);
+
+        gbc.gridx = 1; gbc.weightx = 1.0;
+        intelTargetSpinner = new JSpinner(new SpinnerNumberModel(150.0, 0.0, 100000.0, 10.0));
+        intelTargetSpinner.setEditor(new JSpinner.NumberEditor(intelTargetSpinner, "#,##0.00"));
+        intelTargetSpinner.setPreferredSize(new Dimension(150, 28));
+        panel.add(intelTargetSpinner, gbc);
+
+        // T-Shirt Sizing
+        gbc.gridx = 0; gbc.gridy = 2; gbc.weightx = 0;
+        JLabel tshirtLbl = new JLabel("T-Shirt Target (₱):");
+        tshirtLbl.setForeground(ThemeUtils.TEXT_PRIMARY);
+        panel.add(tshirtLbl, gbc);
+
+        gbc.gridx = 1; gbc.weightx = 1.0;
+        tshirtTargetSpinner = new JSpinner(new SpinnerNumberModel(500.0, 0.0, 100000.0, 10.0));
+        tshirtTargetSpinner.setEditor(new JSpinner.NumberEditor(tshirtTargetSpinner, "#,##0.00"));
+        tshirtTargetSpinner.setPreferredSize(new Dimension(150, 28));
+        panel.add(tshirtTargetSpinner, gbc);
+
+        // CIT Night
+        gbc.gridx = 0; gbc.gridy = 3; gbc.weightx = 0;
+        JLabel citNightLbl = new JLabel("CIT Night Target (₱):");
+        citNightLbl.setForeground(ThemeUtils.TEXT_PRIMARY);
+        panel.add(citNightLbl, gbc);
+
+        gbc.gridx = 1; gbc.weightx = 1.0;
+        citNightTargetSpinner = new JSpinner(new SpinnerNumberModel(200.0, 0.0, 100000.0, 10.0));
+        citNightTargetSpinner.setEditor(new JSpinner.NumberEditor(citNightTargetSpinner, "#,##0.00"));
+        citNightTargetSpinner.setPreferredSize(new Dimension(150, 28));
+        panel.add(citNightTargetSpinner, gbc);
+
+        // Penalties
+        gbc.gridx = 0; gbc.gridy = 4; gbc.weightx = 0;
+        JLabel penaltiesLbl = new JLabel("Penalties Target (₱):");
+        penaltiesLbl.setForeground(ThemeUtils.TEXT_PRIMARY);
+        panel.add(penaltiesLbl, gbc);
+
+        gbc.gridx = 1; gbc.weightx = 1.0;
+        penaltiesTargetSpinner = new JSpinner(new SpinnerNumberModel(50.0, 0.0, 100000.0, 10.0));
+        penaltiesTargetSpinner.setEditor(new JSpinner.NumberEditor(penaltiesTargetSpinner, "#,##0.00"));
+        penaltiesTargetSpinner.setPreferredSize(new Dimension(150, 28));
+        panel.add(penaltiesTargetSpinner, gbc);
+
+        // Status label
+        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 2;
+        categoryTargetStatusLabel = new JLabel("Loaded from database settings.");
+        categoryTargetStatusLabel.setFont(categoryTargetStatusLabel.getFont().deriveFont(Font.PLAIN, 11f));
+        categoryTargetStatusLabel.setForeground(ThemeUtils.TEXT_MUTED);
+        panel.add(categoryTargetStatusLabel, gbc);
+
+        // Save button
+        gbc.gridx = 0; gbc.gridy = 6; gbc.gridwidth = 2;
+        JButton saveTargetsBtn = new JButton("💾 Save Category Targets");
+        ThemeUtils.styleButton(saveTargetsBtn, ThemeUtils.NEON_GREEN);
+        saveTargetsBtn.addActionListener(e -> saveCategoryTargets());
+        panel.add(saveTargetsBtn, gbc);
+
+        return panel;
+    }
+
+    private void saveCategoryTargets() {
+        try {
+            double intel = ((Number) intelTargetSpinner.getValue()).doubleValue();
+            double tshirt = ((Number) tshirtTargetSpinner.getValue()).doubleValue();
+            double cit = ((Number) citNightTargetSpinner.getValue()).doubleValue();
+            double pen = ((Number) penaltiesTargetSpinner.getValue()).doubleValue();
+
+            db.setCategoryFullTarget("Intel Fee", intel);
+            db.setCategoryFullTarget("T-Shirt Sizing", tshirt);
+            db.setCategoryFullTarget("CIT Night", cit);
+            db.setCategoryFullTarget("Penalties", pen);
+
+            categoryTargetStatusLabel.setText(String.format("Saved: Intel ₱%,.2f, T-Shirt ₱%,.2f, CIT ₱%,.2f, Penalties ₱%,.2f", intel, tshirt, cit, pen));
+            categoryTargetStatusLabel.setForeground(ThemeUtils.NEON_GREEN);
+            JOptionPane.showMessageDialog(this, "Category full payment targets saved successfully!", "Saved", JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Error saving category targets: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
     private JPanel createAboutPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBackground(ThemeUtils.BG_CARD);
@@ -586,6 +699,12 @@ public class SettingsPanel extends JPanel {
             defaultFilePathField.setText(file.getAbsolutePath());
             autoLoadDefaultFile.setSelected(true);
         }
+
+        // Load category full targets
+        if (intelTargetSpinner != null) intelTargetSpinner.setValue(db.getCategoryFullTarget("Intel Fee"));
+        if (tshirtTargetSpinner != null) tshirtTargetSpinner.setValue(db.getCategoryFullTarget("T-Shirt Sizing"));
+        if (citNightTargetSpinner != null) citNightTargetSpinner.setValue(db.getCategoryFullTarget("CIT Night"));
+        if (penaltiesTargetSpinner != null) penaltiesTargetSpinner.setValue(db.getCategoryFullTarget("Penalties"));
     }
 
     public void refreshDatabaseInfo() {

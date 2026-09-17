@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Students Panel - Manage student records with profile avatar,
@@ -56,6 +57,11 @@ public class StudentPanel extends JPanel {
 
     // Receipts feed
     private JPanel receiptsFeedContainer;
+
+    // Fast caching and debouncing for similarity check
+    private final Map<String, Optional<SimilarStudentCandidate>> similarityCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private javax.swing.Timer similarityDebounceTimer;
+    private SwingWorker<SimilarStudentCandidate, Void> currentSimilarityWorker;
 
     public StudentPanel() {
         this.db = DatabaseManager.getInstance();
@@ -754,39 +760,81 @@ public class StudentPanel extends JPanel {
             return;
         }
 
-        SwingWorker<SimilarStudentCandidate, Void> worker = new SwingWorker<>() {
-            @Override
-            protected SimilarStudentCandidate doInBackground() {
-                List<Student> all = studentTableModel.getStudents();
-                List<SimilarStudentCandidate> matches = similarityService.findSimilarForStudent(student, all, 0.85);
-                return matches.isEmpty() ? null : matches.get(0);
+        // 1. Instant check from in-memory cache (0ms lookup)
+        String code = student.getStudentCode();
+        if (similarityCache.containsKey(code)) {
+            Optional<SimilarStudentCandidate> cached = similarityCache.get(code);
+            if (cached != null && cached.isPresent()) {
+                currentSimilarityCandidate = cached.get();
+                Student other = currentSimilarityCandidate.getStudentA().getStudentCode().equals(student.getStudentCode())
+                    ? currentSimilarityCandidate.getStudentB() : currentSimilarityCandidate.getStudentA();
+                similarityAlertText.setText(String.format("<html><b>Similar Name:</b> %s (%d%% match)</html>",
+                    other.getName(), currentSimilarityCandidate.getSimilarityPercentage()));
+                similarityAlertCard.setVisible(true);
+            } else {
+                currentSimilarityCandidate = null;
+                similarityAlertCard.setVisible(false);
             }
+            return;
+        }
 
-            @Override
-            protected void done() {
-                try {
-                    SimilarStudentCandidate cand = get();
-                    if (cand != null && currentSelectedStudent != null &&
-                        currentSelectedStudent.getStudentCode().equals(student.getStudentCode())) {
-                        currentSimilarityCandidate = cand;
-                        Student other = cand.getStudentA().getStudentCode().equals(student.getStudentCode())
-                            ? cand.getStudentB() : cand.getStudentA();
-                        similarityAlertText.setText(String.format("<html><b>Similar Name:</b> %s (%d%% match)</html>",
-                            other.getName(), cand.getSimilarityPercentage()));
-                        similarityAlertCard.setVisible(true);
-                    } else {
-                        currentSimilarityCandidate = null;
+        // 2. Debounce similarity computation when rapidly scrolling/arrowing through students
+        if (similarityDebounceTimer != null && similarityDebounceTimer.isRunning()) {
+            similarityDebounceTimer.stop();
+        }
+        if (currentSimilarityWorker != null && !currentSimilarityWorker.isDone()) {
+            currentSimilarityWorker.cancel(true);
+        }
+        similarityAlertCard.setVisible(false);
+
+        similarityDebounceTimer = new javax.swing.Timer(160, e -> {
+            currentSimilarityWorker = new SwingWorker<>() {
+                @Override
+                protected SimilarStudentCandidate doInBackground() {
+                    if (isCancelled()) return null;
+                    List<Student> all = studentTableModel.getStudents();
+                    List<SimilarStudentCandidate> matches = similarityService.findSimilarForStudent(student, all, 0.85);
+                    return matches.isEmpty() ? null : matches.get(0);
+                }
+
+                @Override
+                protected void done() {
+                    if (isCancelled()) return;
+                    try {
+                        SimilarStudentCandidate cand = get();
+                        similarityCache.put(code, Optional.ofNullable(cand));
+                        if (currentSelectedStudent != null &&
+                            currentSelectedStudent.getStudentCode().equals(student.getStudentCode())) {
+                            if (cand != null) {
+                                currentSimilarityCandidate = cand;
+                                Student other = cand.getStudentA().getStudentCode().equals(student.getStudentCode())
+                                    ? cand.getStudentB() : cand.getStudentA();
+                                similarityAlertText.setText(String.format("<html><b>Similar Name:</b> %s (%d%% match)</html>",
+                                    other.getName(), cand.getSimilarityPercentage()));
+                                similarityAlertCard.setVisible(true);
+                            } else {
+                                currentSimilarityCandidate = null;
+                                similarityAlertCard.setVisible(false);
+                            }
+                        }
+                    } catch (Exception ignored) {
                         similarityAlertCard.setVisible(false);
                     }
-                } catch (Exception ignored) {
-                    similarityAlertCard.setVisible(false);
                 }
-            }
-        };
-        worker.execute();
+            };
+            currentSimilarityWorker.execute();
+        });
+        similarityDebounceTimer.setRepeats(false);
+        similarityDebounceTimer.start();
     }
 
     private void clearDetails() {
+        if (similarityDebounceTimer != null && similarityDebounceTimer.isRunning()) {
+            similarityDebounceTimer.stop();
+        }
+        if (currentSimilarityWorker != null && !currentSimilarityWorker.isDone()) {
+            currentSimilarityWorker.cancel(true);
+        }
         currentSelectedStudent = null;
         currentSimilarityCandidate = null;
         if (avatarPanel != null) {
@@ -808,6 +856,7 @@ public class StudentPanel extends JPanel {
     }
 
     public void refreshData() {
+        similarityCache.clear();
         SwingWorker<List<Student>, Void> worker = new SwingWorker<>() {
             @Override
             protected List<Student> doInBackground() throws Exception {

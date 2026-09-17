@@ -1,4 +1,5 @@
 com\payment\StudentMergeAndTermTest.class
+com\payment\ImportServiceTest.class
 com\payment\ImportBatchTest.class
 com\payment\NameSimilarityTest.class
 com\payment\NameNormalizerTest.class

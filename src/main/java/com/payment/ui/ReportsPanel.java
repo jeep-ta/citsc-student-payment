@@ -41,6 +41,14 @@ public class ReportsPanel extends JPanel {
     private JLabel summaryLabel;
     private JLabel recordCountLabel; // Prominent record count in header
 
+    // Category Full Payment Target Controls
+    private JLabel targetFeeLabel;
+    private JSpinner targetFeeSpinner;
+    private JButton saveTargetButton;
+    private JButton configAllTargetsButton;
+    private boolean isUpdatingTargetSpinner = false;
+    private volatile List<Payment> cachedAllPayments = null;
+
     public ReportsPanel() {
         this.db = DatabaseManager.getInstance();
         initializeUI();
@@ -124,10 +132,42 @@ public class ReportsPanel extends JPanel {
         categoryFilter.setEnabled(false);
         categoryFilter.addActionListener(e -> {
             if (isSingleCategoryMode()) {
+                updateCategoryTargetFromDb();
                 generateReport();
             }
         });
         row1.add(categoryFilter);
+
+        targetFeeLabel = new JLabel("Full Fee: ₱");
+        targetFeeLabel.setFont(targetFeeLabel.getFont().deriveFont(Font.BOLD, 12f));
+        targetFeeLabel.setForeground(ThemeUtils.NEON_GREEN);
+        targetFeeLabel.setEnabled(false);
+        row1.add(targetFeeLabel);
+
+        targetFeeSpinner = new JSpinner(new SpinnerNumberModel(500.0, 0.0, 100000.0, 10.0));
+        JSpinner.NumberEditor targetEditor = new JSpinner.NumberEditor(targetFeeSpinner, "#,##0.00");
+        targetFeeSpinner.setEditor(targetEditor);
+        targetEditor.getTextField().addActionListener(e -> saveCurrentCategoryTarget());
+        targetFeeSpinner.setPreferredSize(new Dimension(95, 30));
+        targetFeeSpinner.setEnabled(false);
+        targetFeeSpinner.setToolTipText("Full payment target for the selected category. Press Enter or click Set to apply.");
+        row1.add(targetFeeSpinner);
+
+        saveTargetButton = new JButton("💾 Set");
+        ThemeUtils.styleButton(saveTargetButton, ThemeUtils.NEON_GREEN);
+        saveTargetButton.setPreferredSize(new Dimension(75, 30));
+        saveTargetButton.setToolTipText("Save full target amount for this category");
+        saveTargetButton.setEnabled(false);
+        saveTargetButton.addActionListener(e -> saveCurrentCategoryTarget());
+        row1.add(saveTargetButton);
+
+        configAllTargetsButton = new JButton("⚙ All Targets...");
+        ThemeUtils.styleButton(configAllTargetsButton, ThemeUtils.NEON_PURPLE);
+        configAllTargetsButton.setPreferredSize(new Dimension(120, 30));
+        configAllTargetsButton.setToolTipText("Define full targets for all fee categories");
+        configAllTargetsButton.setEnabled(false);
+        configAllTargetsButton.addActionListener(e -> openConfigureCategoryTargetsDialog());
+        row1.add(configAllTargetsButton);
 
         controlsPanel.add(row1);
 
@@ -194,7 +234,10 @@ public class ReportsPanel extends JPanel {
 
         JButton generateButton = new JButton("🔄 Refresh Report");
         ThemeUtils.styleButton(generateButton, ThemeUtils.NEON_CYAN);
-        generateButton.addActionListener(e -> generateReport());
+        generateButton.addActionListener(e -> {
+            cachedAllPayments = null;
+            generateReport();
+        });
         row3.add(generateButton);
 
         JButton exportCsvButton = new JButton("📊 Export CSV");
@@ -259,9 +302,138 @@ public class ReportsPanel extends JPanel {
         boolean active = isSingleCategoryMode();
         if (categoryLabel != null) categoryLabel.setEnabled(active);
         if (categoryFilter != null) categoryFilter.setEnabled(active);
+        if (targetFeeLabel != null) targetFeeLabel.setEnabled(active);
+        if (targetFeeSpinner != null) targetFeeSpinner.setEnabled(active);
+        if (saveTargetButton != null) saveTargetButton.setEnabled(active);
+        if (configAllTargetsButton != null) configAllTargetsButton.setEnabled(active);
+        if (active) {
+            updateCategoryTargetFromDb();
+        }
+    }
+
+    private void updateCategoryTargetFromDb() {
+        if (categoryFilter == null || targetFeeSpinner == null) return;
+        String cat = (String) categoryFilter.getSelectedItem();
+        if (cat == null) cat = "T-Shirt Sizing";
+        double target = db.getCategoryFullTarget(cat);
+        isUpdatingTargetSpinner = true;
+        try {
+            targetFeeSpinner.setValue(target);
+        } finally {
+            isUpdatingTargetSpinner = false;
+        }
+    }
+
+    private void onTargetFeeSpinnerChanged() {
+        if (isUpdatingTargetSpinner) return;
+        saveCurrentCategoryTarget();
+    }
+
+    private void saveCurrentCategoryTarget() {
+        if (categoryFilter == null || targetFeeSpinner == null) return;
+        String cat = (String) categoryFilter.getSelectedItem();
+        if (cat == null) cat = "T-Shirt Sizing";
+        Object val = targetFeeSpinner.getValue();
+        double amount = (val instanceof Number) ? ((Number) val).doubleValue() : 0.0;
+        try {
+            db.setCategoryFullTarget(cat, amount);
+            if (statusLabel != null) {
+                statusLabel.setText(String.format("Updated %s full target to ₱%,.2f", cat, amount));
+            }
+            if (isSingleCategoryMode()) {
+                generateReport();
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Failed to save category target: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void openConfigureCategoryTargetsDialog() {
+        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this), "Configure Category Full Targets", Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setLayout(new BorderLayout(15, 15));
+        dialog.getContentPane().setBackground(ThemeUtils.BG_CARD);
+
+        JPanel mainPanel = new JPanel();
+        mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
+        mainPanel.setOpaque(false);
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(16, 20, 16, 20));
+
+        JLabel titleLbl = new JLabel("💵 Define Full Payment Targets Per Category");
+        titleLbl.setFont(titleLbl.getFont().deriveFont(Font.BOLD, 15f));
+        titleLbl.setForeground(ThemeUtils.NEON_CYAN);
+        titleLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+        mainPanel.add(titleLbl);
+
+        JLabel subLbl = new JLabel("Students reaching these thresholds are marked 'Fully Paid' in Single Category Reports.");
+        subLbl.setFont(subLbl.getFont().deriveFont(Font.PLAIN, 11f));
+        subLbl.setForeground(ThemeUtils.TEXT_SECONDARY);
+        subLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+        mainPanel.add(subLbl);
+        mainPanel.add(Box.createVerticalStrut(14));
+
+        Map<String, Double> currentTargets = db.getAllCategoryFullTargets();
+        Map<String, JSpinner> spinners = new LinkedHashMap<>();
+
+        JPanel gridPanel = new JPanel(new GridLayout(4, 2, 12, 10));
+        gridPanel.setOpaque(false);
+        gridPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        String[] categories = new String[]{"Intel Fee", "T-Shirt Sizing", "CIT Night", "Penalties"};
+        for (String cat : categories) {
+            JLabel lbl = new JLabel(cat + " (₱):");
+            lbl.setForeground(ThemeUtils.TEXT_PRIMARY);
+            lbl.setFont(lbl.getFont().deriveFont(Font.BOLD, 12f));
+            gridPanel.add(lbl);
+
+            double cur = currentTargets.getOrDefault(cat, DatabaseManager.getDefaultCategoryTarget(cat));
+            JSpinner sp = new JSpinner(new SpinnerNumberModel(cur, 0.0, 100000.0, 10.0));
+            sp.setEditor(new JSpinner.NumberEditor(sp, "#,##0.00"));
+            sp.setPreferredSize(new Dimension(110, 28));
+            spinners.put(cat, sp);
+            gridPanel.add(sp);
+        }
+        mainPanel.add(gridPanel);
+
+        // Buttons
+        JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
+        btnPanel.setOpaque(false);
+
+        JButton saveBtn = new JButton("💾 Save Targets");
+        ThemeUtils.styleButton(saveBtn, ThemeUtils.NEON_GREEN);
+        saveBtn.addActionListener(e -> {
+            try {
+                for (Map.Entry<String, JSpinner> entry : spinners.entrySet()) {
+                    Object val = entry.getValue().getValue();
+                    double d = (val instanceof Number) ? ((Number) val).doubleValue() : 0.0;
+                    db.setCategoryFullTarget(entry.getKey(), d);
+                }
+                updateCategoryTargetFromDb();
+                if (isSingleCategoryMode()) {
+                    generateReport();
+                }
+                dialog.dispose();
+                JOptionPane.showMessageDialog(this, "Category full payment targets saved successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(dialog, "Error saving targets: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        JButton cancelBtn = new JButton("Cancel");
+        ThemeUtils.styleButton(cancelBtn, ThemeUtils.TEXT_SECONDARY);
+        cancelBtn.addActionListener(e -> dialog.dispose());
+
+        btnPanel.add(cancelBtn);
+        btnPanel.add(saveBtn);
+
+        dialog.add(mainPanel, BorderLayout.CENTER);
+        dialog.add(btnPanel, BorderLayout.SOUTH);
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
     }
 
     public void refreshData() {
+        cachedAllPayments = null;
         SwingWorker<Void, Void> worker = new SwingWorker<>() {
             private List<String> programs = List.of();
             private List<String> years = List.of();
@@ -319,7 +491,10 @@ public class ReportsPanel extends JPanel {
     }
 
     private List<Payment> getFilteredPayments() throws Exception {
-        List<Payment> payments = db.getAllPayments();
+        if (cachedAllPayments == null) {
+            cachedAllPayments = db.getAllPayments();
+        }
+        List<Payment> payments = cachedAllPayments;
         String dateFromStr = dateFromField.getText().trim();
         String dateToStr = dateToField.getText().trim();
         String program = (String) programFilter.getSelectedItem();
@@ -360,12 +535,6 @@ public class ReportsPanel extends JPanel {
 
             @Override
             protected Void doInBackground() throws Exception {
-                // Keep term-based reports synchronized with the declarations
-                // currently stored in Settings, including payments imported
-                // before a rule was added or edited.
-                if (reportType.contains("Student Payment Report") || reportType.contains("Academic Term Report") || reportType.contains("Single Category")) {
-                    db.refreshFeeTermAssignments();
-                }
                 if (reportType.contains("Student Payment Report")) {
                     data = generateStudentPaymentReportSeparatedByTerm();
                     columns = new String[]{"Academic Year", "Term", "Student Code", "Name", "Program", "Receipt #", "Receipt AY", "Receipt Term", "Date", "Intel Fee", "T-Shirt", "Penalties", "CIT Night", "Received By", "Term Total"};
@@ -433,22 +602,60 @@ public class ReportsPanel extends JPanel {
         CyberCellRenderer centerCyanRenderer = new CyberCellRenderer(SwingConstants.CENTER, ThemeUtils.NEON_CYAN);
         CyberCellRenderer rightRenderer = new CyberCellRenderer(SwingConstants.RIGHT, ThemeUtils.TEXT_PRIMARY);
         CyberCurrencyRenderer currencyRenderer = new CyberCurrencyRenderer();
+        CyberStatusCellRenderer statusRenderer = new CyberStatusCellRenderer();
+
+        // Enable horizontal scrolling when table has many columns (e.g. 3+ payment installments)
+        if (reportTable.getColumnCount() > 7) {
+            reportTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+        } else {
+            reportTable.setAutoResizeMode(JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS);
+        }
 
         for (int i = 0; i < reportTable.getColumnCount(); i++) {
             String name = reportTable.getColumnName(i);
+            TableColumn col = reportTable.getColumnModel().getColumn(i);
+
+            // Assign cell renderers
             if (name.contains("Amount") || name.contains("Total") || name.contains("Payment") || name.equals("Intel Fee") || name.equals("T-Shirt") || name.equals("Penalties") || name.equals("CIT Night")) {
-                reportTable.getColumnModel().getColumn(i).setCellRenderer(currencyRenderer);
+                col.setCellRenderer(currencyRenderer);
             } else if (name.contains("Count") || name.contains("Records") || name.equals("New") || name.equals("Duplicates") || name.equals("Conflicts") || name.equals("Errors")) {
-                reportTable.getColumnModel().getColumn(i).setCellRenderer(rightRenderer);
-            } else if (name.contains("Date") || name.equals("Academic Year") || name.equals("Term") || name.contains("Receipt") || name.equals("Student Code") || name.equals("Status") || name.equals("Batch Code") || name.equals("#")) {
-                reportTable.getColumnModel().getColumn(i).setCellRenderer(centerCyanRenderer);
+                col.setCellRenderer(rightRenderer);
+            } else if (name.equals("Status")) {
+                col.setCellRenderer(statusRenderer);
+            } else if (name.contains("Date") || name.equals("Academic Year") || name.equals("Term") || name.contains("Receipt") || name.equals("Student Code") || name.equals("Batch Code") || name.equals("#")) {
+                col.setCellRenderer(centerCyanRenderer);
             } else {
-                reportTable.getColumnModel().getColumn(i).setCellRenderer(defaultRenderer);
+                col.setCellRenderer(defaultRenderer);
             }
 
+            // Assign clean, proportional column widths
             if (name.equals("#")) {
-                reportTable.getColumnModel().getColumn(i).setPreferredWidth(45);
-                reportTable.getColumnModel().getColumn(i).setMaxWidth(60);
+                col.setPreferredWidth(45);
+                col.setMaxWidth(60);
+            } else if (name.contains("Receipt #")) {
+                col.setPreferredWidth(100);
+            } else if (name.equals("Student Name") || name.equals("Name")) {
+                col.setPreferredWidth(190);
+            } else if (name.equals("Program")) {
+                col.setPreferredWidth(75);
+            } else if (name.contains("Payment")) {
+                col.setPreferredWidth(105);
+            } else if (name.contains("Total") || name.contains("Amount")) {
+                col.setPreferredWidth(110);
+            } else if (name.equals("Status")) {
+                col.setPreferredWidth(120);
+            } else if (name.equals("Remarks")) {
+                col.setPreferredWidth(180);
+            } else if (name.contains("Date")) {
+                col.setPreferredWidth(130);
+            } else if (name.equals("Academic Year") || name.equals("Receipt AY")) {
+                col.setPreferredWidth(105);
+            } else if (name.equals("Term") || name.equals("Receipt Term")) {
+                col.setPreferredWidth(115);
+            } else if (name.equals("Received By")) {
+                col.setPreferredWidth(120);
+            } else {
+                col.setPreferredWidth(110);
             }
         }
     }
@@ -576,8 +783,9 @@ public class ReportsPanel extends JPanel {
         }
     }
 
-    private static String getOrdinalSuffix(int n) {
-        if (n >= 11 && n <= 13) return "th";
+    static String getOrdinalSuffix(int n) {
+        int mod100 = n % 100;
+        if (mod100 >= 11 && mod100 <= 13) return "th";
         switch (n % 10) {
             case 1: return "st";
             case 2: return "nd";
@@ -603,7 +811,7 @@ public class ReportsPanel extends JPanel {
 
     /**
      * Generates an alphabetical roster for a single category of payment.
-     * Multiple payments for the same category (e.g. downpayment + balance) are shown
+     * Multiple payments for the same category (e.g. downpayment + balance, or 3+ installments) are shown
      * together on the same record line alongside the first payment.
      */
     SingleCategoryResult generateSingleCategoryReport(String category) throws Exception {
@@ -620,6 +828,16 @@ public class ReportsPanel extends JPanel {
             String name;
             String program;
             final List<Payment> payments = new ArrayList<>();
+        }
+
+        // Pre-build mapping of normalized name to studentId to ensure all payments for the same student group together
+        Map<String, String> normNameToStudentId = new HashMap<>();
+        for (Payment p : payments) {
+            String sId = p.getStudentId() != null ? p.getStudentId().trim() : "";
+            String norm = p.getName() != null ? NameNormalizer.normalize(p.getName()) : "";
+            if (!sId.isEmpty() && !norm.isEmpty()) {
+                normNameToStudentId.putIfAbsent(norm, sId);
+            }
         }
 
         Map<String, StudentGroup> groupMap = new LinkedHashMap<>();
@@ -639,12 +857,15 @@ public class ReportsPanel extends JPanel {
                 if (!termLabel.equalsIgnoreCase(fTerm)) continue;
             }
 
-            String key = (p.getStudentId() != null && !p.getStudentId().isBlank())
-                ? p.getStudentId().trim()
-                : (p.getName() != null ? NameNormalizer.normalize(p.getName()) : "");
-            if (key.isEmpty()) {
-                key = "id_" + p.getId();
+            String sId = p.getStudentId() != null ? p.getStudentId().trim() : "";
+            String norm = p.getName() != null ? NameNormalizer.normalize(p.getName()) : "";
+            if (sId.isEmpty() && !norm.isEmpty() && normNameToStudentId.containsKey(norm)) {
+                sId = normNameToStudentId.get(norm);
             }
+
+            String key = !sId.isEmpty()
+                ? "id:" + sId.toUpperCase()
+                : (!norm.isEmpty() ? "name:" + norm : "rec:" + p.getId());
 
             StudentGroup group = groupMap.computeIfAbsent(key, k -> {
                 StudentGroup sg = new StudentGroup();
@@ -654,6 +875,9 @@ public class ReportsPanel extends JPanel {
                 return sg;
             });
 
+            if ((group.studentId == null || group.studentId.isBlank()) && !sId.isEmpty()) {
+                group.studentId = sId;
+            }
             if ((group.name == null || group.name.equalsIgnoreCase("Unknown")) && p.getName() != null) {
                 group.name = p.getName().trim();
             }
@@ -679,6 +903,7 @@ public class ReportsPanel extends JPanel {
             }
         }
         int paymentSlots = Math.max(2, maxPayments);
+        double categoryTarget = db.getCategoryFullTarget(category);
 
         // Build columns dynamically
         List<String> colList = new ArrayList<>();
@@ -693,6 +918,7 @@ public class ReportsPanel extends JPanel {
             colList.add(i + suffix + " Payment");
         }
         colList.add("Total Paid");
+        colList.add("Status");
         colList.add("Remarks");
         colList.add("Date");
 
@@ -736,6 +962,20 @@ public class ReportsPanel extends JPanel {
                 .mapToDouble(p -> getCategoryAmount(p, category))
                 .sum();
             row.put("Total Paid", totalPaid);
+
+            String status;
+            if (categoryTarget <= 0) {
+                status = "Paid";
+            } else if (Math.abs(totalPaid - categoryTarget) < 0.01) {
+                status = "Fully Paid";
+            } else if (totalPaid > categoryTarget + 0.01) {
+                status = "Overpaid";
+            } else if (totalPaid > 0) {
+                status = "Partially Paid";
+            } else {
+                status = "Unpaid";
+            }
+            row.put("Status", status);
 
             // Deduplicated remarks
             List<String> rems = new ArrayList<>();
@@ -1193,6 +1433,48 @@ public class ReportsPanel extends JPanel {
             } else {
                 setBackground(row % 2 == 0 ? ThemeUtils.BG_SURFACE : new Color(17, 24, 37));
                 setForeground(ThemeUtils.NEON_GREEN);
+            }
+            setFont(getFont().deriveFont(Font.BOLD, 12f));
+            setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
+            return this;
+        }
+    }
+
+    private static class CyberStatusCellRenderer extends DefaultTableCellRenderer {
+        public CyberStatusCellRenderer() {
+            setHorizontalAlignment(CENTER);
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                boolean isSelected, boolean hasFocus, int row, int column) {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+
+            if (isSelected) {
+                setBackground(new Color(30, 58, 100));
+            } else {
+                setBackground(row % 2 == 0 ? ThemeUtils.BG_SURFACE : new Color(17, 24, 37));
+            }
+
+            if (value != null) {
+                String s = value.toString().trim();
+                setText(s);
+                if ("Fully Paid".equalsIgnoreCase(s) || "ACTIVE".equalsIgnoreCase(s) || "COMPLETED".equalsIgnoreCase(s)) {
+                    setForeground(ThemeUtils.NEON_GREEN);
+                } else if ("Partially Paid".equalsIgnoreCase(s) || "PENDING".equalsIgnoreCase(s)) {
+                    setForeground(ThemeUtils.NEON_AMBER);
+                } else if ("Overpaid".equalsIgnoreCase(s)) {
+                    setForeground(new Color(236, 72, 153)); // Neon Pink
+                } else if ("VOID".equalsIgnoreCase(s) || "CONFLICT".equalsIgnoreCase(s) || "ERROR".equalsIgnoreCase(s) || "Unpaid".equalsIgnoreCase(s)) {
+                    setForeground(ThemeUtils.NEON_ROSE);
+                } else if ("REFUNDED".equalsIgnoreCase(s)) {
+                    setForeground(ThemeUtils.NEON_PURPLE);
+                } else {
+                    setForeground(ThemeUtils.NEON_CYAN);
+                }
+            } else {
+                setText("-");
+                setForeground(ThemeUtils.TEXT_MUTED);
             }
             setFont(getFont().deriveFont(Font.BOLD, 12f));
             setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));

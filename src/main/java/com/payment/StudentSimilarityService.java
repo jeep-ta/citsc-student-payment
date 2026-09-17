@@ -24,6 +24,10 @@ public class StudentSimilarityService {
         this.db = db;
     }
 
+    private Set<String> getDismissedKeys() {
+        return db != null ? db.getDismissedSimilarityPairKeys() : Collections.emptySet();
+    }
+
     /**
      * Detect pairs of students with similar names.
      *
@@ -45,7 +49,7 @@ public class StudentSimilarityService {
 
         Set<String> dismissedKeys = (includeDismissed || db == null)
             ? Collections.emptySet()
-            : db.getDismissedSimilarityPairKeys();
+            : getDismissedKeys();
 
         List<SimilarStudentCandidate> candidates = new ArrayList<>();
 
@@ -77,6 +81,11 @@ public class StudentSimilarityService {
                     continue;
                 }
 
+                // Fast length filter before full compare
+                if (Math.abs(name1.length() - name2.length()) > 8 && !sameProgram) {
+                    continue;
+                }
+
                 NameSimilarity.SimilarityResult result = NameSimilarity.compare(name1, name2);
                 double finalScore = result.score();
                 List<String> reasons = new ArrayList<>(result.reasons());
@@ -97,42 +106,61 @@ public class StudentSimilarityService {
 
         // Sort by similarity descending
         candidates.sort((c1, c2) -> Double.compare(c2.getSimilarityScore(), c1.getSimilarityScore()));
-
         return candidates;
     }
 
     /**
-     * Find candidates similar to a specific student.
+     * Find candidates similar to a specific student with fast pre-filtering.
      */
     public List<SimilarStudentCandidate> findSimilarForStudent(
             Student target,
             List<Student> allStudents,
             double minThreshold) {
 
-        if (target == null || allStudents == null) {
+        if (target == null || allStudents == null || target.getName() == null || target.getName().isBlank()) {
             return Collections.emptyList();
         }
 
-        Set<String> dismissedKeys = db != null ? db.getDismissedSimilarityPairKeys() : Collections.emptySet();
+        Set<String> dismissedKeys = getDismissedKeys();
         List<SimilarStudentCandidate> candidates = new ArrayList<>();
+        String targetClean = NameSimilarity.cleanName(target.getName());
+        int targetLen = targetClean.length();
+        if (targetLen == 0) return Collections.emptyList();
+        List<String> targetTokens = NameSimilarity.extractTokens(target.getName());
+        String targetProg = target.getProgram() != null ? target.getProgram().trim() : "";
 
         for (Student s : allStudents) {
             if (s.getStudentCode() != null && s.getStudentCode().equalsIgnoreCase(target.getStudentCode())) {
                 continue;
             }
+            String sName = s.getName();
+            if (sName == null || sName.isBlank()) continue;
 
             String pairKey = SimilarStudentCandidate.makePairKey(target.getStudentCode(), s.getStudentCode());
             if (dismissedKeys.contains(pairKey)) {
                 continue;
             }
 
-            NameSimilarity.SimilarityResult result = NameSimilarity.compare(target.getName(), s.getName());
+            // Quick pre-filter: length difference check
+            int sLen = sName.length();
+            if (Math.abs(targetLen - sLen) > 8) {
+                // If length difference is large, only compare if they share at least one word token of length >= 3
+                boolean sharesToken = false;
+                for (String tToken : targetTokens) {
+                    if (tToken.length() >= 3 && sName.toLowerCase().contains(tToken)) {
+                        sharesToken = true;
+                        break;
+                    }
+                }
+                if (!sharesToken) continue;
+            }
+
+            NameSimilarity.SimilarityResult result = NameSimilarity.compare(target.getName(), sName);
             double finalScore = result.score();
             List<String> reasons = new ArrayList<>(result.reasons());
 
-            String prog1 = target.getProgram() != null ? target.getProgram().trim() : "";
             String prog2 = s.getProgram() != null ? s.getProgram().trim() : "";
-            boolean sameProgram = !prog1.isEmpty() && !prog2.isEmpty() && prog1.equalsIgnoreCase(prog2);
+            boolean sameProgram = !targetProg.isEmpty() && !prog2.isEmpty() && targetProg.equalsIgnoreCase(prog2);
 
             if (sameProgram && finalScore >= 0.70 && finalScore < 0.98) {
                 finalScore = Math.min(0.99, finalScore + 0.04);
